@@ -610,7 +610,6 @@ do -- rage tab configuration
         }):AddColorPicker('AimbotColor', {
             Default = Color3.new(1, 1, 1),
             Title = 'Aimbot Tracer Color',
-            Transparency = 0,
             Callback = function(value)
                 _G.aimbot_color = value
                 if _G.aimbot_tracer then
@@ -620,7 +619,6 @@ do -- rage tab configuration
         }):AddColorPicker('AimbotOutlineColor', {
             Default = Color3.new(0, 0, 0),
             Title = 'Aimbot Outline Color',
-            Transparency = 0,
             Callback = function(value)
                 _G.aimbot_outline_color = value
                 if _G.aimbot_tracer_outline then
