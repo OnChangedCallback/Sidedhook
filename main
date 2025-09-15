@@ -22,7 +22,9 @@ local Window = Library:CreateWindow({
 
 -- tabs
 local Tabs = {
+    ['Rage'] = Window:AddTab('Rage'),
     ['UI Settings'] = Window:AddTab('UI Settings'),
+    
 }
 
 do -- ui settings configuration
@@ -148,5 +150,522 @@ do -- ui settings configuration
                 Library.KeybindFrame.Visible = value
             end
         })
+    end
+end
+
+do -- rage tab configuration
+    -- targeting framework
+    do
+        local targeting_state = {current = nil}
+        pcall(function()
+            _G.targeting_state = targeting_state
+        end)
+        
+        local utility = {}
+        
+        function utility:ValidateClient(player)
+            if not player then return false end
+            local character = player.Character
+            if not character then return false end
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if not humanoid or humanoid.Health <= 0 then return false end
+            return humanoid.RootPart ~= nil
+        end
+        
+        function utility:GetPreferredPart(character)
+            return character and 
+                (character:FindFirstChild("HumanoidRootPart") or 
+                 character:FindFirstChild("Head") or 
+                 character:FindFirstChild("UpperTorso") or
+                 character:FindFirstChild("Torso")) or nil
+        end
+        
+        function utility:ToScreen(position)
+            local camera = workspace.CurrentCamera
+            local screenPos, onScreen = camera:WorldToViewportPoint(position)
+            return Vector2.new(screenPos.X, screenPos.Y), onScreen
+        end
+        
+        function utility:GetMouseLocation()
+            local UserInputService = game:GetService("UserInputService")
+            return UserInputService:GetMouseLocation()
+        end
+        
+        function utility:GetMouseDistance(screenPos)
+            return (utility:GetMouseLocation() - screenPos).Magnitude
+        end
+        
+        function utility:isPlayerKO(player)
+            if not player or not player.Character then return false end
+            
+            -- Проверяем K.O статус через BodyEffects
+            local success, isKO = pcall(function()
+                local playerInWorkspace = workspace.Players:FindFirstChild(player.Name)
+                if playerInWorkspace and playerInWorkspace:FindFirstChild("BodyEffects") then
+                    local koEffect = playerInWorkspace.BodyEffects:FindFirstChild("K.O")
+                    if koEffect and koEffect.value then
+                        return koEffect.value == true
+                    end
+                end
+                return false
+            end)
+            
+            if success then
+                return isKO
+            end
+            
+            -- Fallback к проверке здоровья если BodyEffects недоступны
+            local humanoid = player.Character:FindFirstChild("Humanoid")
+            return humanoid and humanoid.Health <= 0
+        end
+        
+        local framework = {}
+        
+        function framework:GetClosestTarget()
+            local closest = nil
+            local shortestDistance = math.huge
+            local mousePos = utility:GetMouseLocation()
+            
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and utility:ValidateClient(player) then
+                    -- Проверяем, нужно ли пропускать цель с K.O статусом
+                    if _G.skip_ko and utility:isPlayerKO(player) then
+                        -- Пропускаем игрока с K.O статусом
+                    else
+                        local character = player.Character
+                        local part = utility:GetPreferredPart(character)
+                        if part then
+                            local screenPos, onScreen = utility:ToScreen(part.Position)
+                            if onScreen then
+                                local distance = utility:GetMouseDistance(screenPos)
+                                if distance < shortestDistance then
+                                    shortestDistance = distance
+                                    closest = player
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            
+            return closest
+        end
+        
+        function framework:SetTarget(player)
+            if utility:ValidateClient(player) then
+                targeting_state.current = player
+                local koStatus = utility:isPlayerKO(player)
+                Library:Notify('Target: ' .. player.Name .. ' | isKO: ' .. tostring(koStatus), 2)
+                return true
+            else
+                targeting_state.current = nil
+                Library:Notify('Invalid target', 2)
+                return false
+            end
+        end
+        
+        function framework:GetCurrentTarget()
+            if targeting_state.current and utility:ValidateClient(targeting_state.current) then
+                return targeting_state.current
+            else
+                targeting_state.current = nil
+                return nil
+            end
+        end
+        
+        function framework:UpdateTarget()
+            local current = targeting_state.current
+            if current and not utility:ValidateClient(current) then
+                -- Цель умерла или недоступна, ищем новую
+                local newTarget = framework:GetClosestTarget()
+                if newTarget then
+                    framework:SetTarget(newTarget)
+                else
+                    targeting_state.current = nil
+                    Library:Notify('No valid targets', 2)
+                end
+            end
+        end
+        
+        _G.targeting_framework = framework
+    end
+    
+    -- silent aim implementation
+    do
+        local lastPositions, lastUpdateTimes = {}, {}
+        
+        local function predictPosition(player)
+            if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return nil end
+            local aimPart = player.Character.HumanoidRootPart
+            local aimPartPos = aimPart.Position
+            local playerId = player.UserId
+            
+            if not lastPositions[playerId] or not lastUpdateTimes[playerId] then
+                lastPositions[playerId] = aimPartPos
+                lastUpdateTimes[playerId] = tick()
+                return aimPartPos
+            end
+            
+            local currentTime = tick()
+            local deltaTime = currentTime - lastUpdateTimes[playerId]
+            local predictedPos
+            local resolverType = _G.resolver_type
+            
+            if resolverType == "Velocity" then
+                local velocity = aimPart.Velocity
+                predictedPos = aimPartPos + Vector3.new(
+                    velocity.X * _G.prediction_xz,
+                    velocity.Y * _G.prediction_y,
+                    velocity.Z * _G.prediction_xz
+                )
+            elseif resolverType == "Move direction" then
+                predictedPos = aimPartPos + (player.Character.Humanoid.MoveDirection * (_G.prediction_xz * 10))
+            elseif resolverType == "Calculate Cframe" then
+                local distance = (aimPartPos - lastPositions[playerId]).Magnitude
+                if distance < 0.001 then
+                    predictedPos = aimPartPos
+                else
+                    local predictedDistance = (distance / deltaTime) * (0.1 * (_G.prediction_xz * 10))
+                    predictedPos = aimPartPos + (aimPartPos - lastPositions[playerId]).Unit * predictedDistance
+                    local yChange = (aimPartPos.Y - lastPositions[playerId].Y) / deltaTime * (0.1 * _G.prediction_y)
+                    predictedPos = predictedPos + Vector3.new(0, yChange, 0)
+                end
+            end
+            
+            lastPositions[playerId] = aimPartPos
+            lastUpdateTimes[playerId] = currentTime
+            return predictedPos
+        end
+        
+        -- Метатейбл хук для mouse.Hit/Target
+        local mt = getrawmetatable(game)
+        local oldIndex = mt.__index
+        setreadonly(mt, false)
+        
+        mt.__index = function(self, key)
+            if not checkcaller() and self == LocalPlayer:GetMouse() and _G.silent_aim_enabled then
+                if key == "Hit" or key == "Target" then
+                    local targetPlayer = _G.targeting_state.current
+                    if targetPlayer and targetPlayer.Character then
+                        local targetPart = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        if targetPart then
+                            local finalPos = predictPosition(targetPlayer)
+                            if finalPos then
+                                local humanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+                                if humanoid then
+                                    if humanoid:GetState() == Enum.HumanoidStateType.Jumping then
+                                        finalPos = finalPos + Vector3.new(0, 2, 0)
+                                    elseif humanoid:GetState() == Enum.HumanoidStateType.Freefall then
+                                        finalPos = finalPos + Vector3.new(0, -1, 0)
+                                    end
+                                end
+                                return key == "Hit" and CFrame.new(finalPos) or targetPart
+                            end
+                        end
+                    end
+                end
+            end
+            return oldIndex(self, key)
+        end
+        
+        setreadonly(mt, true)
+    end
+    
+    -- aimbot tracer implementation
+    do
+        -- Создаем drawing объекты для трейсера (outline + основная линия)
+        local Drawing = Drawing or {}
+        
+        -- Outline линия (обводка)
+        _G.aimbot_tracer_outline = Drawing.new("Line")
+        _G.aimbot_tracer_outline.Visible = false
+        _G.aimbot_tracer_outline.Color = Color3.new(0, 0, 0) -- черный по умолчанию
+        _G.aimbot_tracer_outline.Thickness = 3.5
+        _G.aimbot_tracer_outline.Transparency = 1
+        _G.aimbot_tracer_outline.ZIndex = 0
+        
+        -- Основная линия
+        _G.aimbot_tracer = Drawing.new("Line")
+        _G.aimbot_tracer.Visible = false
+        _G.aimbot_tracer.Color = Color3.new(1, 1, 1) -- белый по умолчанию
+        _G.aimbot_tracer.Thickness = 1.5
+        _G.aimbot_tracer.Transparency = 1
+        _G.aimbot_tracer.ZIndex = 1
+        
+        -- Функция для получения handle позиции
+        local function getToolHandle()
+            local character = LocalPlayer.Character
+            if not character then return nil end
+            local tool = character:FindFirstChildOfClass("Tool")
+            if not tool or not tool:FindFirstChild("Handle") then return nil end
+            return tool.Handle.Position
+        end
+        
+        -- Функция для обновления трейсера
+        local function updateTracer()
+            if not _G.show_aimbot or not _G.silent_aim_enabled then
+                _G.aimbot_tracer.Visible = false
+                _G.aimbot_tracer_outline.Visible = false
+                return
+            end
+            
+            local targetPlayer = _G.targeting_state.current
+            if not targetPlayer or not targetPlayer.Character then
+                _G.aimbot_tracer.Visible = false
+                _G.aimbot_tracer_outline.Visible = false
+                return
+            end
+            
+            local handlePos = getToolHandle()
+            if not handlePos then
+                _G.aimbot_tracer.Visible = false
+                _G.aimbot_tracer_outline.Visible = false
+                return
+            end
+            
+            -- Получаем предсказанную позицию (координаты аиминга)
+            local targetPart = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if not targetPart then
+                _G.aimbot_tracer.Visible = false
+                _G.aimbot_tracer_outline.Visible = false
+                return
+            end
+            
+            local lastPositions, lastUpdateTimes = {}, {}
+            local function predictPosition(player)
+                if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return nil end
+                local aimPart = player.Character.HumanoidRootPart
+                local aimPartPos = aimPart.Position
+                local playerId = player.UserId
+                
+                if not lastPositions[playerId] or not lastUpdateTimes[playerId] then
+                    lastPositions[playerId] = aimPartPos
+                    lastUpdateTimes[playerId] = tick()
+                    return aimPartPos
+                end
+                
+                local currentTime = tick()
+                local deltaTime = currentTime - lastUpdateTimes[playerId]
+                local predictedPos
+                local resolverType = _G.resolver_type
+                
+                if resolverType == "Velocity" then
+                    local velocity = aimPart.Velocity
+                    predictedPos = aimPartPos + Vector3.new(
+                        velocity.X * _G.prediction_xz,
+                        velocity.Y * _G.prediction_y,
+                        velocity.Z * _G.prediction_xz
+                    )
+                elseif resolverType == "Move direction" then
+                    predictedPos = aimPartPos + (player.Character.Humanoid.MoveDirection * (_G.prediction_xz * 10))
+                elseif resolverType == "Calculate Cframe" then
+                    local distance = (aimPartPos - lastPositions[playerId]).Magnitude
+                    if distance < 0.001 then
+                        predictedPos = aimPartPos
+                    else
+                        local predictedDistance = (distance / deltaTime) * (0.1 * (_G.prediction_xz * 10))
+                        predictedPos = aimPartPos + (aimPartPos - lastPositions[playerId]).Unit * predictedDistance
+                        local yChange = (aimPartPos.Y - lastPositions[playerId].Y) / deltaTime * (0.1 * _G.prediction_y)
+                        predictedPos = predictedPos + Vector3.new(0, yChange, 0)
+                    end
+                end
+                
+                lastPositions[playerId] = aimPartPos
+                lastUpdateTimes[playerId] = currentTime
+                return predictedPos
+            end
+            
+            local aimPos = predictPosition(targetPlayer)
+            if not aimPos then
+                _G.aimbot_tracer.Visible = false
+                _G.aimbot_tracer_outline.Visible = false
+                return
+            end
+            
+            -- Конвертируем 3D позиции в 2D экранные координаты
+            local camera = workspace.CurrentCamera
+            local handleScreenPos, handleOnScreen = camera:WorldToViewportPoint(handlePos)
+            local aimScreenPos, aimOnScreen = camera:WorldToViewportPoint(aimPos)
+            
+            if handleOnScreen and aimOnScreen then
+                local fromPos = Vector2.new(handleScreenPos.X, handleScreenPos.Y)
+                local toPos = Vector2.new(aimScreenPos.X, aimScreenPos.Y)
+                
+                -- Обновляем outline линию
+                _G.aimbot_tracer_outline.From = fromPos
+                _G.aimbot_tracer_outline.To = toPos
+                _G.aimbot_tracer_outline.Color = _G.aimbot_outline_color
+                _G.aimbot_tracer_outline.Visible = true
+                
+                -- Обновляем основную линию
+                _G.aimbot_tracer.From = fromPos
+                _G.aimbot_tracer.To = toPos
+                _G.aimbot_tracer.Color = _G.aimbot_color
+                _G.aimbot_tracer.Visible = true
+            else
+                _G.aimbot_tracer.Visible = false
+                _G.aimbot_tracer_outline.Visible = false
+            end
+        end
+        
+        -- Подключаем обновление трейсера к Heartbeat
+        local RunService = game:GetService("RunService")
+        _G.tracer_update_connection = RunService.Heartbeat:Connect(updateTracer)
+    end
+    
+    -- targeting groupbox
+    do
+        local TargetingGroup = Tabs['Rage']:AddLeftGroupbox('             Targeting')
+        
+        TargetingGroup:AddLabel('select'):AddKeyPicker('TargetKey', {
+            Default = 'Q',
+            NoUI = false,
+            Text = 'Target Key',
+            Callback = function()
+                local framework = _G.targeting_framework
+                if framework then
+                    -- Проверяем, есть ли уже цель
+                    if _G.targeting_state.current then
+                        -- Если есть цель, сбрасываем её
+                        _G.targeting_state.current = nil
+                        Library:Notify('Target cleared', 2)
+                    else
+                        -- Если нет цели, ищем новую
+                        local target = framework:GetClosestTarget()
+                        if target then
+                            framework:SetTarget(target)
+                        else
+                            Library:Notify('No targets found', 2)
+                        end
+                    end
+                end
+            end
+        })
+        
+        TargetingGroup:AddToggle('SilentAim', {
+            Text = 'SilentAim',
+            Default = false,
+            Tooltip = 'Silent aim on selected target',
+            Callback = function(value)
+                _G.silent_aim_enabled = value
+                if value then
+                    Library:Notify('SilentAim enabled', 2)
+                else
+                    Library:Notify('SilentAim disabled', 2)
+                end
+            end
+        })
+        
+        -- Создаем dependency box для настроек SilentAim
+        local SilentAimDepbox = TargetingGroup:AddDependencyBox()
+        
+        SilentAimDepbox:AddInput('PredictionXZ', {
+            Default = '0.1',
+            Numeric = true,
+            Finished = false,
+            Text = 'Prediction XZ',
+            Tooltip = 'Prediction value for X and Z axis',
+            Callback = function(value)
+                _G.prediction_xz = tonumber(value) or 0.1
+            end
+        })
+        
+        SilentAimDepbox:AddInput('PredictionY', {
+            Default = '0.1',
+            Numeric = true,
+            Finished = false,
+            Text = 'Prediction Y',
+            Tooltip = 'Prediction value for Y axis',
+            Callback = function(value)
+                _G.prediction_y = tonumber(value) or 0.1
+            end
+        })
+        
+        SilentAimDepbox:AddDropdown('ResolverType', {
+            Values = {'Velocity', 'Move direction', 'Calculate Cframe'},
+            Default = 1,
+            Multi = false,
+            Text = 'Resolver Type',
+            Tooltip = 'Type of movement resolver',
+            Callback = function(value)
+                _G.resolver_type = value
+            end
+        })
+        
+        SilentAimDepbox:AddToggle('ShowAimbot', {
+            Text = 'Show Aimbot',
+            Default = false,
+            Tooltip = 'Show tracer from tool handle to aim position',
+            Callback = function(value)
+                _G.show_aimbot = value
+                if not value then
+                    if _G.aimbot_tracer then
+                        _G.aimbot_tracer.Visible = false
+                    end
+                    if _G.aimbot_tracer_outline then
+                        _G.aimbot_tracer_outline.Visible = false
+                    end
+                end
+            end
+        }):AddColorPicker('AimbotColor', {
+            Default = Color3.new(1, 1, 1),
+            Title = 'Aimbot Tracer Color',
+            Transparency = 0,
+            Callback = function(value)
+                _G.aimbot_color = value
+                if _G.aimbot_tracer then
+                    _G.aimbot_tracer.Color = value
+                end
+            end
+        }):AddColorPicker('AimbotOutlineColor', {
+            Default = Color3.new(0, 0, 0),
+            Title = 'Aimbot Outline Color',
+            Transparency = 0,
+            Callback = function(value)
+                _G.aimbot_outline_color = value
+                if _G.aimbot_tracer_outline then
+                    _G.aimbot_tracer_outline.Color = value
+                end
+            end
+        })
+        
+        -- Настраиваем зависимости
+        SilentAimDepbox:SetupDependencies({
+            { Toggles.SilentAim, true }
+        })
+        
+        -- Инициализируем настройки SilentAim
+        _G.silent_aim_enabled = false
+        _G.prediction_xz = 0.1
+        _G.prediction_y = 0.1
+        _G.resolver_type = 'Velocity'
+        _G.show_aimbot = false
+        _G.aimbot_color = Color3.new(1, 1, 1) -- белый по умолчанию
+        _G.aimbot_outline_color = Color3.new(0, 0, 0) -- черный по умолчанию
+        
+        -- Auto update всегда включен
+        local RunService = game:GetService("RunService")
+        _G.target_update_connection = RunService.Heartbeat:Connect(function()
+            if _G.targeting_framework then
+                _G.targeting_framework:UpdateTarget()
+            end
+        end)
+    end
+    
+    -- skips groupbox
+    do
+        local SkipsGroup = Tabs['Rage']:AddRightGroupbox('Skips')
+        
+        SkipsGroup:AddToggle('SkipKO', {
+            Text = 'K.O',
+            Default = true,
+            Tooltip = 'Skip targets with K.O status',
+            Callback = function(value)
+                _G.skip_ko = value
+            end
+        })
+        
+        -- Инициализируем настройку
+        _G.skip_ko = true
     end
 end
