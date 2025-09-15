@@ -1,0 +1,150 @@
+-- variables
+local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/'
+local TeleportService, HttpService, Players = game:GetService("TeleportService"), game:GetService("HttpService"), game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+-- ac bypass
+loadstring(game:HttpGet("https://pastebin.com/raw/gimbTwW1"))()
+
+-- library initialization
+local Library = loadstring(game:HttpGet(repo .. 'Library.lua'))()
+local ThemeManager = loadstring(game:HttpGet(repo .. 'addons/ThemeManager.lua'))()
+local SaveManager = loadstring(game:HttpGet(repo .. 'addons/SaveManager.lua'))()
+
+-- window creation
+local Window = Library:CreateWindow({
+    Title = 'Clientsidedhook.pub',
+    Center = true,
+    AutoShow = true,
+    TabPadding = 8,
+    MenuFadeTime = 0.2
+})
+
+-- tabs
+local Tabs = {
+    ['UI Settings'] = Window:AddTab('UI Settings'),
+}
+
+-- ui settings tab
+do
+    local MenuGroup = Tabs['UI Settings']:AddLeftGroupbox('Menu')
+    
+    MenuGroup:AddButton('Unload', function() 
+        Library:Unload() 
+    end)
+    
+    MenuGroup:AddLabel('Menu bind'):AddKeyPicker('MenuKeybind', { 
+        Default = 'End', 
+        NoUI = true, 
+        Text = 'Menu keybind' 
+    })
+    
+    Library.ToggleKeybind = Options.MenuKeybind
+    
+    -- managers setup
+    ThemeManager:SetLibrary(Library)
+    SaveManager:SetLibrary(Library)
+    SaveManager:IgnoreThemeSettings()
+    SaveManager:SetIgnoreIndexes({ 'MenuKeybind' })
+    
+    -- folders
+    ThemeManager:SetFolder('MyScriptHub')
+    SaveManager:SetFolder('MyScriptHub/specific-game')
+    
+    -- build sections
+    SaveManager:BuildConfigSection(Tabs['UI Settings'])
+    ThemeManager:ApplyToTab(Tabs['UI Settings'])
+    
+    -- autoload
+    SaveManager:LoadAutoloadConfig()
+end
+
+-- server groupbox
+do
+    local ServerGroup = Tabs['UI Settings']:AddRightGroupbox('Server')
+    
+    ServerGroup:AddButton({
+        Text = 'Copy GameID',
+        Func = function()
+            setclipboard(tostring(game.GameId))
+            Library:Notify('GameID copied to clipboard', 2)
+        end,
+        Tooltip = '>_<'
+    })
+    
+    ServerGroup:AddButton({
+        Text = 'Copy JobID', 
+        Func = function()
+            setclipboard(game.JobId)
+            Library:Notify('JobID copied to clipboard', 2)
+        end,
+        Tooltip = '>_<'
+    })
+    
+    ServerGroup:AddButton({
+        Text = 'Copy Join Script',
+        Func = function()
+            local joinScript = 'game:GetService("TeleportService"):TeleportToPlaceInstance(' .. 
+                              game.PlaceId .. ', "' .. game.JobId .. '", game.Players.LocalPlayer)'
+            setclipboard(joinScript)
+            Library:Notify('Join script copied to clipboard', 2)
+        end,
+        Tooltip = '>_<'
+    })
+    
+    ServerGroup:AddButton({
+        Text = 'Rejoin Game',
+        Func = function()
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+        end,
+        Tooltip = '>_<'
+    })
+    
+    ServerGroup:AddButton({
+        Text = 'Join New Server',
+        Func = function()
+            local success, serverData = pcall(function()
+                return HttpService:JSONDecode(
+                    game:HttpGetAsync(
+                        "https://games.roblox.com/v1/games/" .. 
+                        game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+                    )
+                )
+            end)
+            
+            if success and serverData and serverData.data and #serverData.data > 0 then
+                local randomServer = serverData.data[math.random(1, #serverData.data)]
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, randomServer.id)
+            else
+                Library:Notify('nope', 3)
+            end
+        end,
+        Tooltip = '>_<'
+    })
+end
+
+-- hud groupbox
+do
+    local HUDGroup = Tabs['UI Settings']:AddRightGroupbox('HUD')
+    
+    HUDGroup:AddToggle('Watermark', {
+        Text = 'Watermark',
+        Default = false,
+        Tooltip = '>_<',
+        Callback = function(value)
+            if value then
+                Library:SetWatermark('Clientsidedhook.pub | ' .. os.date('%d.%m.%Y'))
+            end
+            Library:SetWatermarkVisibility(value)
+        end
+    })
+    
+    HUDGroup:AddToggle('KeybindList', {
+        Text = 'Keybind List',
+        Default = false,
+        Tooltip = '>_<',
+        Callback = function(value)
+            Library.KeybindFrame.Visible = value
+        end
+    })
+end
