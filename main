@@ -1523,7 +1523,7 @@ do -- rage tab configuration
     
     -- targeting groupbox
     do
-        local TargetingGroup = Tabs['Rage']:AddLeftGroupbox('             Targeting')
+        local TargetingGroup = Tabs['Rage']:AddLeftGroupbox('Targeting')
         
         TargetingGroup:AddLabel('select'):AddKeyPicker('TargetKey', {
             Default = 'Q',
@@ -1715,12 +1715,12 @@ do -- rage tab configuration
                     if _G.MultiWeaponUtility then
                         _G.MultiWeaponUtility:enable()
                     end
-                    Library:Notify('Multi Weapon on', 2)
+                    Library:Notify('on', 2)
                 else
                     if _G.MultiWeaponUtility then
                         _G.MultiWeaponUtility:disable()
                     end
-                    Library:Notify('Multi Weapon off', 2)
+                    Library:Notify('off', 2)
                 end
             end
         })
@@ -1735,9 +1735,9 @@ do -- rage tab configuration
                     if _G.WallbangUtility then
                         local success = _G.WallbangUtility:enable()
                         if success then
-                            Library:Notify('Wallbang on', 2)
+                            Library:Notify('on', 2)
                         else
-                            Library:Notify('Wallbang failed to enable', 3)
+                            Library:Notify('failed to enable', 3)
                             -- Сбрасываем тогл если не удалось включить
                             Toggles.Wallbang:SetValue(false)
                             _G.wallbang_enabled = false
@@ -1747,7 +1747,7 @@ do -- rage tab configuration
                     if _G.WallbangUtility then
                         _G.WallbangUtility:disable()
                     end
-                    Library:Notify('Wallbang off', 2)
+                    Library:Notify('off', 2)
                 end
             end
         })
@@ -1763,12 +1763,12 @@ do -- rage tab configuration
                     if _G.NoSpreadUtility then
                         _G.NoSpreadUtility:enable()
                     end
-                    Library:Notify('NoSpread on', 2)
+                    Library:Notify('on', 2)
                 else
                     if _G.NoSpreadUtility then
                         _G.NoSpreadUtility:disable()
                     end
-                    Library:Notify('NoSpread off', 2)
+                    Library:Notify('off', 2)
                 end
             end
         })
@@ -1809,71 +1809,16 @@ do -- rage tab configuration
                     if _G.RapidFireUtility then
                         _G.RapidFireUtility:enable()
                     end
-                    Library:Notify('RapidFire on', 2)
+                    Library:Notify('on', 2)
                 else
                     if _G.RapidFireUtility then
                         _G.RapidFireUtility:disable()
                     end
-                    Library:Notify('RapidFire off', 2)
+                    Library:Notify('off', 2)
                 end
             end
         })
         
-        TargetingGroup:AddToggle('ExpandHitbox', {
-            Text = 'ExpandHitbox',
-            Default = false,
-            Tooltip = '>_<',
-            Callback = function(value)
-                hitboxExpanderMod.enabled = value
-                if value then
-                    if _G.HitboxExpanderUtility then
-                        _G.HitboxExpanderUtility:enable()
-                    end
-                    Library:Notify('ExpandHitbox on', 2)
-                else
-                    if _G.HitboxExpanderUtility then
-                        _G.HitboxExpanderUtility:disable()
-                    end
-                    Library:Notify('ExpandHitbox off', 2)
-                end
-            end
-        })
-        
-        -- Создаем dependency box для настроек ExpandHitbox
-        local ExpandHitboxDepbox = TargetingGroup:AddDependencyBox()
-        
-        ExpandHitboxDepbox:AddSlider('HitboxSize', {
-            Text = 'Hitbox Size',
-            Default = 20,
-            Min = 5,
-            Max = 50,
-            Rounding = 1,
-            Compact = false,
-            Tooltip = '>_<',
-            Callback = function(value)
-                hitboxExpanderMod.size = value
-            end
-        })
-        
-        ExpandHitboxDepbox:AddToggle('HitboxVisible', {
-            Text = 'Visualise',
-            Default = false,
-            Tooltip = '>_<',
-            Callback = function(value)
-                hitboxExpanderMod.visible = value
-            end
-        }):AddColorPicker('HitboxColor', {
-            Default = Color3.new(1, 0, 0),
-            Title = 'Hitbox Color',
-            Callback = function(value)
-                hitboxExpanderMod.color = value
-            end
-        })
-        
-        -- Настраиваем зависимости
-        ExpandHitboxDepbox:SetupDependencies({
-            { Toggles.ExpandHitbox, true }
-        })
         
         
         -- Инициализируем настройки SilentAim, ForceHit, Magic Bullets, Multi Weapon, Wallbang, NoSpread, RapidFire и ExpandHitbox
@@ -1909,6 +1854,67 @@ do -- rage tab configuration
                 _G.HitboxExpanderUtility:UpdateHitboxes()
             end
         end)
+    end
+    
+    -- other groupbox
+    do
+        local OtherGroup = Tabs['Rage']:AddRightGroupbox('Other')
+        
+        OtherGroup:AddToggle('ExpandHitbox', {
+            Text = 'ExpandHitbox',
+            Default = false,
+            Tooltip = '>_<',
+            Callback = function(value)
+                hitboxExpanderMod.enabled = value
+                if value then
+                    if _G.HitboxExpanderUtility then
+                        _G.HitboxExpanderUtility:enable()
+                    end
+                    Library:Notify('on', 2)
+                else
+                    if _G.HitboxExpanderUtility then
+                        _G.HitboxExpanderUtility:disable()
+                    end
+                    Library:Notify('off', 2)
+                end
+            end
+        })
+        
+        -- Создаем dependency box для настроек ExpandHitbox
+        local ExpandHitboxDepbox = OtherGroup:AddDependencyBox()
+        
+        ExpandHitboxDepbox:AddSlider('HitboxSize', {
+            Text = 'Hitbox Size',
+            Default = 20,
+            Min = 5,
+            Max = 50,
+            Rounding = 1,
+            Compact = false,
+            Tooltip = '>_<',
+            Callback = function(value)
+                hitboxExpanderMod.size = value
+            end
+        })
+        
+        ExpandHitboxDepbox:AddToggle('HitboxVisible', {
+            Text = 'Visualise',
+            Default = false,
+            Tooltip = '>_<',
+            Callback = function(value)
+                hitboxExpanderMod.visible = value
+            end
+        }):AddColorPicker('HitboxColor', {
+            Default = Color3.new(1, 0, 0),
+            Title = 'Hitbox Color',
+            Callback = function(value)
+                hitboxExpanderMod.color = value
+            end
+        })
+        
+        -- Настраиваем зависимости
+        ExpandHitboxDepbox:SetupDependencies({
+            { Toggles.ExpandHitbox, true }
+        })
     end
     
     -- skips groupbox
