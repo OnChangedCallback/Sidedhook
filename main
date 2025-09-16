@@ -1,13 +1,14 @@
 -- variables
 local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/'
 local game, workspace = game, workspace
-local Vector3, Vector2, CFrame, Color3 = Vector3, Vector2, CFrame, Color3
+local Vector3, Vector2, CFrame, Color3, Instance = Vector3, Vector2, CFrame, Color3, Instance
 local Enum = Enum
 local math, tick, pairs, pcall, tostring, tonumber, ipairs, table = math, tick, pairs, pcall, tostring, tonumber, ipairs, table
-local getrawmetatable, setreadonly, checkcaller, hookmetamethod, newcclosure, getnamecallmethod = getrawmetatable, setreadonly, checkcaller, hookmetamethod, newcclosure, getnamecallmethod
+local getrawmetatable, setreadonly, checkcaller, hookmetamethod, newcclosure, getnamecallmethod, hookfunction = getrawmetatable, setreadonly, checkcaller, hookmetamethod, newcclosure, getnamecallmethod, hookfunction
 local loadstring, setclipboard = loadstring, setclipboard
-local TeleportService, HttpService, Players, RunService = game:GetService("TeleportService"), game:GetService("HttpService"), game:GetService("Players"), game:GetService("RunService")
+local TeleportService, HttpService, Players, RunService, UserInputService = game:GetService("TeleportService"), game:GetService("HttpService"), game:GetService("Players"), game:GetService("RunService"), game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
+local random = math.random
 
 -- multi weapon variables
 local allowed_tools = {
@@ -27,6 +28,12 @@ local forceHitTarget = {
     enabled = false,
     position = Vector3.new(0, 0, 0),
     part = nil
+}
+
+-- nospread variables
+local spreadMod = {
+    enabled = false,
+    amount = 100
 }
 
 local Hooks = {}
@@ -373,6 +380,144 @@ do -- rage tab configuration
         end
         
         _G.targeting_framework = framework
+    end
+    
+    -- nospread utility
+    do
+        local noSpreadUtility = {}
+        local weaponHooks = {}
+        
+        function noSpreadUtility:markWeapon(tool)
+            if not tool or not tool:IsA("Tool") then return false end
+            
+            -- Создаем файл с именем равным значению spread
+            local spreadFile = Instance.new("StringValue")
+            spreadFile.Name = tostring(spreadMod.amount)
+            spreadFile.Value = "nospread_marker"
+            spreadFile.Parent = tool
+            
+            return true
+        end
+        
+        function noSpreadUtility:isWeaponMarked(tool)
+            if not tool or not tool:IsA("Tool") then return false end
+            
+            -- Ищем любой файл-маркер spread
+            for _, child in pairs(tool:GetChildren()) do
+                if child:IsA("StringValue") and child.Value == "nospread_marker" then
+                    return true, tonumber(child.Name) or 100
+                end
+            end
+            return false, 100
+        end
+        
+        function noSpreadUtility:updateWeaponSpread(tool)
+            if not tool or not tool:IsA("Tool") then return end
+            
+            local isMarked, currentSpread = noSpreadUtility:isWeaponMarked(tool)
+            if isMarked and currentSpread ~= spreadMod.amount then
+                -- Удаляем старый маркер
+                for _, child in pairs(tool:GetChildren()) do
+                    if child:IsA("StringValue") and child.Value == "nospread_marker" then
+                        child:Destroy()
+                    end
+                end
+                -- Создаем новый с актуальным значением
+                noSpreadUtility:markWeapon(tool)
+            end
+        end
+        
+        function noSpreadUtility:createHook()
+            if weaponHooks.mathRandom then return end
+            
+            weaponHooks.mathRandom = hookfunction(random, function(...)
+                local args = {...}
+                
+                if checkcaller() then
+                    return weaponHooks.mathRandom(...)
+                end
+                
+                -- Проверяем любое оружие без ограничений
+                local character = LocalPlayer.Character
+                if character then
+                    local tool = character:FindFirstChildOfClass("Tool")
+                    if tool and spreadMod.enabled then
+                        local isMarked, toolSpread = noSpreadUtility:isWeaponMarked(tool)
+                        if isMarked then
+                            -- Обновляем spread файл если нужно
+                            noSpreadUtility:updateWeaponSpread(tool)
+                            
+                            -- Проверяем паттерны spread вызовов
+                            if (#args == 0) or 
+                               (args[1] == -0.05 and args[2] == 0.05) or 
+                               (args[1] == -0.1) or
+                               (args[1] == -0.05) then
+                                
+                                local spread = spreadMod.amount
+                                return weaponHooks.mathRandom(...) * (spread / 100)
+                            end
+                        end
+                    end
+                end
+                
+                return weaponHooks.mathRandom(...)
+            end)
+        end
+        
+        function noSpreadUtility:removeHook()
+            -- Не удаляем хук, только отключаем его работу через spreadMod.enabled
+        end
+        
+        function noSpreadUtility:enable()
+            noSpreadUtility:createHook()
+            
+            -- Маркируем текущее оружие если есть (любое оружие)
+            local character = LocalPlayer.Character
+            if character then
+                local tool = character:FindFirstChildOfClass("Tool")
+                if tool then
+                    noSpreadUtility:markWeapon(tool)
+                end
+            end
+        end
+        
+        function noSpreadUtility:disable()
+            -- Не убираем маркеры, только отключаем через spreadMod.enabled
+        end
+        
+        function noSpreadUtility:markAllWeapons()
+            -- Маркируем все оружия в персонаже
+            local character = LocalPlayer.Character
+            if character then
+                for _, tool in pairs(character:GetChildren()) do
+                    if tool:IsA("Tool") then
+                        local isMarked = noSpreadUtility:isWeaponMarked(tool)
+                        if not isMarked then
+                            noSpreadUtility:markWeapon(tool)
+                        else
+                            noSpreadUtility:updateWeaponSpread(tool)
+                        end
+                    end
+                end
+            end
+            
+            -- Маркируем все оружия в рюкзаке
+            local backpack = LocalPlayer:FindFirstChild("Backpack")
+            if backpack then
+                for _, tool in pairs(backpack:GetChildren()) do
+                    if tool:IsA("Tool") then
+                        local isMarked = noSpreadUtility:isWeaponMarked(tool)
+                        if not isMarked then
+                            noSpreadUtility:markWeapon(tool)
+                        else
+                            noSpreadUtility:updateWeaponSpread(tool)
+                        end
+                    end
+                end
+            end
+        end
+        
+        _G.NoSpreadUtility = noSpreadUtility
     end
     
     -- forcehit functionality
@@ -844,7 +989,7 @@ do -- rage tab configuration
             
             local success, err = pcall(function()
                 if wallbang_state.module and wallbang_state.original_ignored ~= nil then
-wallbang_state.module.Ignored = table_clone(wallbang_state.original_ignored)
+                    wallbang_state.module.Ignored = table_clone(wallbang_state.original_ignored)
                 end
                 return true
             end)
@@ -1257,7 +1402,53 @@ wallbang_state.module.Ignored = table_clone(wallbang_state.original_ignored)
             end
         })
         
-        -- Инициализируем настройки SilentAim, ForceHit, Magic Bullets, Multi Weapon и Wallbang
+        TargetingGroup:AddToggle('NoSpread', {
+            Text = 'NoSpread',
+            Default = false,
+            Tooltip = 'Убирает разброс оружия',
+            Callback = function(value)
+                _G.nospread_enabled = value
+                spreadMod.enabled = value
+                if value then
+                    if _G.NoSpreadUtility then
+                        _G.NoSpreadUtility:enable()
+                    end
+                    Library:Notify('NoSpread on', 2)
+                else
+                    if _G.NoSpreadUtility then
+                        _G.NoSpreadUtility:disable()
+                    end
+                    Library:Notify('NoSpread off', 2)
+                end
+            end
+        })
+        
+        -- Создаем dependency box для настроек NoSpread
+        local NoSpreadDepbox = TargetingGroup:AddDependencyBox()
+        
+        NoSpreadDepbox:AddSlider('SpreadAmount', {
+            Text = 'Spread Amount',
+            Default = 100,
+            Min = 0,
+            Max = 100,
+            Rounding = 1,
+            Compact = false,
+            Tooltip = 'Сила разброса (0 = нет разброса, 100 = обычный разброс)',
+            Callback = function(value)
+                spreadMod.amount = value
+                -- Обновляем все маркеры оружий с новым значением
+                if _G.NoSpreadUtility then
+                    _G.NoSpreadUtility:markAllWeapons()
+                end
+            end
+        })
+        
+        -- Настраиваем зависимости
+        NoSpreadDepbox:SetupDependencies({
+            { Toggles.NoSpread, true }
+        })
+        
+        -- Инициализируем настройки SilentAim, ForceHit, Magic Bullets, Multi Weapon, Wallbang и NoSpread
         _G.silent_aim_enabled = false
         _G.forcehit_enabled = false
         _G.magic_bullets_enabled = false
@@ -1265,6 +1456,7 @@ wallbang_state.module.Ignored = table_clone(wallbang_state.original_ignored)
         _G.magic_bullets_checks = {['Forcefield'] = true, ['K.O'] = true, ['Grabbed'] = true}
         _G.multi_weapon_enabled = false
         _G.wallbang_enabled = false
+        _G.nospread_enabled = false
         _G.prediction_xz = 0.1
         _G.prediction_y = 0.1
         _G.resolver_type = 'Velocity'
