@@ -396,6 +396,128 @@ do -- rage tab configuration
         _G.updateForceHitTarget = updateForceHitTarget
     end
     
+    -- magic bullets utility
+    do
+        local magicUtility = {}
+        
+        function magicUtility:getSelectedTarget()
+            -- Используем выбранную цель из системы таргетинга
+            if not _G.targeting_state or not _G.targeting_state.current then
+                return nil
+            end
+            
+            local targetPlayer = _G.targeting_state.current
+            if not targetPlayer or not targetPlayer.Character then
+                return nil
+            end
+            
+            local target_head = targetPlayer.Character:FindFirstChild("Head")
+            return target_head
+        end
+        
+        function magicUtility:performShoot(target)
+            if not target then return false end
+            
+            -- Проверяем K.O статус цели перед выстрелом
+            local targetPlayer = _G.targeting_state.current
+            if targetPlayer and targetPlayer.Character then
+                local bodyEffects = targetPlayer.Character:FindFirstChild("BodyEffects")
+                if bodyEffects and bodyEffects:FindFirstChild("K.O") then
+                    if bodyEffects["K.O"].Value then
+                        return false -- Цель в K.O, не стреляем
+                    end
+                end
+            end
+            
+            local character = LocalPlayer.Character
+            if not character then return false end
+            
+            local tool = character:FindFirstChildOfClass("Tool")
+            if not tool or not tool:FindFirstChild("Handle") then return false end
+            
+            -- Получаем MainRemoteEvent
+            local replicatedStorage = game:GetService("ReplicatedStorage")
+            local mainRemotes = replicatedStorage:FindFirstChild("MainRemotes")
+            if not mainRemotes then return false end
+            
+            local mainRemoteEvent = mainRemotes:FindFirstChild("MainRemoteEvent")
+            if not mainRemoteEvent then return false end
+            
+            -- Спавним пули в голове цели
+            local success = pcall(function()
+                mainRemoteEvent:FireServer(
+                    "ShootGun",
+                    tool.Handle,
+                    target.Position,  -- Стреляем ИЗ головы цели
+                    target.Position,  -- В голову цели
+                    target,
+                    Vector3.new(0, 0, 0)
+                )
+            end)
+            
+            return success
+        end
+        
+        _G.MagicBulletsUtility = magicUtility
+    end
+    
+    -- magic bullets framework
+    do
+        local MagicBulletsFramework = {
+            enabled = false,
+            connection = nil,
+            shootDelay = 0.02,
+            lastShotTime = 0
+        }
+        
+        function MagicBulletsFramework.start()
+            if MagicBulletsFramework.connection then
+                return
+            end
+            
+            MagicBulletsFramework.enabled = true
+            
+            MagicBulletsFramework.connection = RunService.Heartbeat:Connect(function()
+                if not MagicBulletsFramework.enabled then
+                    return
+                end
+                
+                -- Проверяем задержку между выстрелами
+                local now = tick()
+                if now - MagicBulletsFramework.lastShotTime < MagicBulletsFramework.shootDelay then
+                    return
+                end
+                
+                local utility = _G.MagicBulletsUtility
+                if not utility then
+                    return
+                end
+                
+                -- Получаем выбранную цель
+                local target = utility:getSelectedTarget()
+                if not target then
+                    return
+                end
+                
+                -- Выполняем выстрел
+                local success = utility:performShoot(target)
+                if success then
+                    MagicBulletsFramework.lastShotTime = now
+                end
+            end)
+        end
+        
+        function MagicBulletsFramework.stop()
+            MagicBulletsFramework.enabled = false
+            if MagicBulletsFramework.connection then
+                MagicBulletsFramework.connection:Disconnect()
+                MagicBulletsFramework.connection = nil
+            end
+        end
+        
+        _G.MagicBulletsFramework = MagicBulletsFramework
+    end
+    
     -- silent aim prediction logic
     do
         local lastPositions, lastUpdateTimes = {}, {}
@@ -686,9 +808,30 @@ do -- rage tab configuration
             end
         })
         
-        -- Инициализируем настройки SilentAim и ForceHit
+        TargetingGroup:AddToggle('MagicBullets', {
+            Text = 'Magic Bullets',
+            Default = false,
+            Tooltip = '>_<',
+            Callback = function(value)
+                _G.magic_bullets_enabled = value
+                if value then
+                    if _G.MagicBulletsFramework then
+                        _G.MagicBulletsFramework.start()
+                    end
+                    Library:Notify('on', 2)
+                else
+                    if _G.MagicBulletsFramework then
+                        _G.MagicBulletsFramework.stop()
+                    end
+                    Library:Notify('off', 2)
+                end
+            end
+        })
+        
+        -- Инициализируем настройки SilentAim, ForceHit и Magic Bullets
         _G.silent_aim_enabled = false
         _G.forcehit_enabled = false
+        _G.magic_bullets_enabled = false
         _G.prediction_xz = 0.1
         _G.prediction_y = 0.1
         _G.resolver_type = 'Velocity'
@@ -698,8 +841,8 @@ do -- rage tab configuration
         
         -- Auto update только при включенных функциях
         _G.target_update_connection = RunService.Heartbeat:Connect(function()
-            -- Обновляем таргетинг только если включен SilentAim или ForceHit
-            if (_G.silent_aim_enabled or _G.forcehit_enabled) and _G.targeting_framework then
+            -- Обновляем таргетинг только если включен SilentAim, ForceHit или Magic Bullets
+            if (_G.silent_aim_enabled or _G.forcehit_enabled or _G.magic_bullets_enabled) and _G.targeting_framework then
                 _G.targeting_framework:UpdateTarget()
             end
             -- Обновляем ForceHit цель только если ForceHit включен
