@@ -771,6 +771,105 @@ do -- rage tab configuration
         _G.MultiWeaponUtility = multiWeaponUtility
     end
     
+    -- Utility function to deep copy a table
+    local function table_clone(orig)
+        local orig_type = type(orig)
+        local copy
+        if orig_type == 'table' then
+            copy = {}
+            for orig_key, orig_value in next, orig, nil do
+                copy[table_clone(orig_key)] = table_clone(orig_value)
+            end
+            setmetatable(copy, table_clone(getmetatable(orig)))
+        else -- number, string, boolean, etc
+            copy = orig
+        end
+        return copy
+    end
+
+    -- wallbang utility
+    do
+        local wallbangUtility = {}
+        local wallbang_state = {
+            enabled = false,
+            handler = nil,
+            module = nil,
+            original_ignored = nil
+        }
+        
+        function wallbangUtility:enable()
+            if wallbang_state.enabled then return true end
+            
+            local success, err = pcall(function()
+                -- Get MainModule from ReplicatedStorage
+                local mainModule = game:GetService("ReplicatedStorage"):FindFirstChild("MainModule")
+                if not mainModule then
+                    error("MainModule not found in ReplicatedStorage")
+                end
+                
+                -- Require the module
+                local module = require(mainModule)
+                if not module then
+                    error("Failed to require MainModule")
+                end
+                
+                -- Save original state
+                wallbang_state.handler = mainModule
+                wallbang_state.module = module
+                wallbang_state.original_ignored = table_clone(module.Ignored or {})
+                
+                -- Set new Ignored configuration
+                module.Ignored = {
+                    workspace:WaitForChild("Vehicles"),
+                    workspace:WaitForChild("MAP"),
+                    workspace:WaitForChild("Ignored")
+                }
+                
+                wallbang_state.enabled = true
+                return true
+            end)
+            
+            if not success then
+                -- Clean up on error
+                wallbangUtility:disable()
+                warn("Failed to enable Wallbang:", err)
+                return false, err
+            end
+            
+            return true
+        end
+        
+        function wallbangUtility:disable()
+            if not wallbang_state.enabled then return true end
+            
+            local success, err = pcall(function()
+                if wallbang_state.module and wallbang_state.original_ignored ~= nil then
+wallbang_state.module.Ignored = table_clone(wallbang_state.original_ignored)
+                end
+                return true
+            end)
+            
+            -- Always clean up state
+            wallbang_state.enabled = false
+            wallbang_state.module = nil
+            wallbang_state.handler = nil
+            wallbang_state.original_ignored = nil
+            
+            if not success then
+                warn("Error disabling Wallbang:", err)
+                return false, err
+            end
+            
+            return true
+        end
+        
+        function wallbangUtility:isEnabled()
+            return wallbang_state.enabled == true
+        end
+        
+        _G.WallbangUtility = wallbangUtility
+    end
+    
     -- silent aim prediction logic
     do
         local lastPositions, lastUpdateTimes = {}, {}
@@ -1131,13 +1230,41 @@ do -- rage tab configuration
             end
         })
         
-        -- Инициализируем настройки SilentAim, ForceHit, Magic Bullets и Multi Weapon
+        TargetingGroup:AddToggle('Wallbang', {
+            Text = 'Wallbang',
+            Default = false,
+            Tooltip = 'Позволяет стрелять сквозь стены',
+            Callback = function(value)
+                _G.wallbang_enabled = value
+                if value then
+                    if _G.WallbangUtility then
+                        local success = _G.WallbangUtility:enable()
+                        if success then
+                            Library:Notify('Wallbang on', 2)
+                        else
+                            Library:Notify('Wallbang failed to enable', 3)
+                            -- Сбрасываем тогл если не удалось включить
+                            Toggles.Wallbang:SetValue(false)
+                            _G.wallbang_enabled = false
+                        end
+                    end
+                else
+                    if _G.WallbangUtility then
+                        _G.WallbangUtility:disable()
+                    end
+                    Library:Notify('Wallbang off', 2)
+                end
+            end
+        })
+        
+        -- Инициализируем настройки SilentAim, ForceHit, Magic Bullets, Multi Weapon и Wallbang
         _G.silent_aim_enabled = false
         _G.forcehit_enabled = false
         _G.magic_bullets_enabled = false
         _G.magic_bullets_mode = 'Target'
         _G.magic_bullets_checks = {['Forcefield'] = true, ['K.O'] = true, ['Grabbed'] = true}
         _G.multi_weapon_enabled = false
+        _G.wallbang_enabled = false
         _G.prediction_xz = 0.1
         _G.prediction_y = 0.1
         _G.resolver_type = 'Velocity'
