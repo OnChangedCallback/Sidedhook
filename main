@@ -466,7 +466,7 @@ do -- rage tab configuration
         local MagicBulletsFramework = {
             enabled = false,
             connection = nil,
-            shootDelay = 0.02,
+            shootDelay = 0.01,
             lastShotTime = 0
         }
         
