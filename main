@@ -42,6 +42,14 @@ local rapidFireMod = {
     speed = 0.00000000000000000001
 }
 
+-- hitbox expander variables
+local hitboxExpanderMod = {
+    enabled = false,
+    size = 20,
+    visible = false,
+    color = Color3.new(1, 0, 0)
+}
+
 local Hooks = {}
 
 loadstring(game:HttpGet("https://raw.githubusercontent.com/OnChangedCallback/Sidedhook/refs/heads/main/antileak"))()
@@ -111,7 +119,7 @@ local SaveManager = loadstring(game:HttpGet(repo .. 'addons/SaveManager.lua'))()
 
 -- window creation
 local Window = Library:CreateWindow({
-    Title = 'Clientsidedhook.pub',
+    Title = 'RAZE.pub',
     Center = true,
     AutoShow = true,
     TabPadding = 8,
@@ -1418,6 +1426,101 @@ do -- rage tab configuration
         end)
     end
     
+    -- hitbox expander utility
+    do
+        local hitboxExpanderUtility = {}
+        local HitboxExpandedPlayers = {}
+        
+        function hitboxExpanderUtility:ExpandHitbox(player, size, visible, color)
+            if not player.Character then return end
+            local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+            if not hrp then return end
+
+            if not HitboxExpandedPlayers[player] then
+                HitboxExpandedPlayers[player] = {
+                    OriginalSize = hrp.Size,
+                    OriginalTransparency = hrp.Transparency,
+                    OriginalCanCollide = hrp.CanCollide,
+                    SelectionBox = nil
+                }
+            end
+
+            local data = HitboxExpandedPlayers[player]
+            hrp.Size = Vector3.new(size, size, size)
+            hrp.CanCollide = false
+
+            if visible then
+                hrp.Transparency = 0.9 -- highly transparent so visible but not fully blocking
+                if not data.SelectionBox then
+                    local selBox = Instance.new("SelectionBox")
+                    selBox.Adornee = hrp
+                    selBox.Color3 = color or Color3.new(1, 0, 0)
+                    selBox.LineThickness = 0.05
+                    selBox.SurfaceTransparency = 0.7
+                    selBox.Parent = hrp
+                    data.SelectionBox = selBox
+                else
+                    data.SelectionBox.Color3 = color or Color3.new(1, 0, 0)
+                end
+            else
+                hrp.Transparency = 1 -- fully invisible
+                if data.SelectionBox then
+                    data.SelectionBox:Destroy()
+                    data.SelectionBox = nil
+                end
+            end
+        end
+
+        function hitboxExpanderUtility:ResetHitbox(player)
+            if not player.Character then return end
+            local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+            local data = HitboxExpandedPlayers[player]
+            if hrp and data then
+                hrp.Size = data.OriginalSize
+                hrp.Transparency = data.OriginalTransparency
+                hrp.CanCollide = data.OriginalCanCollide
+                if data.SelectionBox then
+                    data.SelectionBox:Destroy()
+                    data.SelectionBox = nil
+                end
+                HitboxExpandedPlayers[player] = nil
+            end
+        end
+
+        function hitboxExpanderUtility:UpdateHitboxes()
+            local enabled = hitboxExpanderMod.enabled
+            local size = hitboxExpanderMod.size
+            local visible = hitboxExpanderMod.visible
+            local color = hitboxExpanderMod.color
+
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                    if enabled and not (_G.skip_ko and _G.IsKO and _G.IsKO(player)) then
+                        hitboxExpanderUtility:ExpandHitbox(player, size, visible, color)
+                    else
+                        hitboxExpanderUtility:ResetHitbox(player)
+                    end
+                end
+            end
+        end
+
+        function hitboxExpanderUtility:enable()
+            hitboxExpanderMod.enabled = true
+        end
+
+        function hitboxExpanderUtility:disable()
+            hitboxExpanderMod.enabled = false
+            -- Сбрасываем все хитбоксы при отключении
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer then
+                    hitboxExpanderUtility:ResetHitbox(player)
+                end
+            end
+        end
+
+        _G.HitboxExpanderUtility = hitboxExpanderUtility
+    end
+    
     -- targeting groupbox
     do
         local TargetingGroup = Tabs['Rage']:AddLeftGroupbox('             Targeting')
@@ -1580,7 +1683,7 @@ do -- rage tab configuration
             Default = {'Forcefield', 'K.O', 'Grabbed'},
             Multi = true,
             Text = 'Checks',
-            Tooltip = 'Выберите какие проверки использовать',
+            Tooltip = '>_<',
             Callback = function(value)
                 _G.magic_bullets_checks = value
             end
@@ -1591,7 +1694,7 @@ do -- rage tab configuration
             Default = 1,
             Multi = false,
             Text = 'Mode',
-            Tooltip = 'Target - только по выбранной цели, Killaura - по всем ближайшим',
+            Tooltip = '>_<',
             Callback = function(value)
                 _G.magic_bullets_mode = value
             end
@@ -1605,7 +1708,7 @@ do -- rage tab configuration
         TargetingGroup:AddToggle('MultiWeapon', {
             Text = 'Multi Weapon',
             Default = false,
-            Tooltip = 'Экипирует все доступные оружия одновременно',
+            Tooltip = '>_<',
             Callback = function(value)
                 _G.multi_weapon_enabled = value
                 if value then
@@ -1625,7 +1728,7 @@ do -- rage tab configuration
         TargetingGroup:AddToggle('Wallbang', {
             Text = 'Wallbang',
             Default = false,
-            Tooltip = 'Позволяет стрелять сквозь стены',
+            Tooltip = '>_<',
             Callback = function(value)
                 _G.wallbang_enabled = value
                 if value then
@@ -1652,7 +1755,7 @@ do -- rage tab configuration
         TargetingGroup:AddToggle('NoSpread', {
             Text = 'NoSpread',
             Default = false,
-            Tooltip = 'Убирает разброс оружия',
+            Tooltip = '>_<',
             Callback = function(value)
                 _G.nospread_enabled = value
                 spreadMod.enabled = value
@@ -1680,7 +1783,7 @@ do -- rage tab configuration
             Max = 100,
             Rounding = 1,
             Compact = false,
-            Tooltip = 'Сила разброса (0 = нет разброса, 100 = обычный разброс)',
+            Tooltip = '>_<',
             Callback = function(value)
                 spreadMod.amount = value
                 -- Обновляем все маркеры оружий с новым значением
@@ -1698,7 +1801,7 @@ do -- rage tab configuration
         TargetingGroup:AddToggle('RapidFire', {
             Text = 'RapidFire',
             Default = false,
-            Tooltip = 'Увеличивает скорострельность оружия',
+            Tooltip = '>_<',
             Callback = function(value)
                 _G.rapidfire_enabled = value
                 rapidFireMod.enabled = value
@@ -1716,8 +1819,64 @@ do -- rage tab configuration
             end
         })
         
+        TargetingGroup:AddToggle('ExpandHitbox', {
+            Text = 'ExpandHitbox',
+            Default = false,
+            Tooltip = '>_<',
+            Callback = function(value)
+                hitboxExpanderMod.enabled = value
+                if value then
+                    if _G.HitboxExpanderUtility then
+                        _G.HitboxExpanderUtility:enable()
+                    end
+                    Library:Notify('ExpandHitbox on', 2)
+                else
+                    if _G.HitboxExpanderUtility then
+                        _G.HitboxExpanderUtility:disable()
+                    end
+                    Library:Notify('ExpandHitbox off', 2)
+                end
+            end
+        })
         
-        -- Инициализируем настройки SilentAim, ForceHit, Magic Bullets, Multi Weapon, Wallbang, NoSpread и RapidFire
+        -- Создаем dependency box для настроек ExpandHitbox
+        local ExpandHitboxDepbox = TargetingGroup:AddDependencyBox()
+        
+        ExpandHitboxDepbox:AddSlider('HitboxSize', {
+            Text = 'Hitbox Size',
+            Default = 20,
+            Min = 5,
+            Max = 50,
+            Rounding = 1,
+            Compact = false,
+            Tooltip = '>_<',
+            Callback = function(value)
+                hitboxExpanderMod.size = value
+            end
+        })
+        
+        ExpandHitboxDepbox:AddToggle('HitboxVisible', {
+            Text = 'Visualise',
+            Default = false,
+            Tooltip = '>_<',
+            Callback = function(value)
+                hitboxExpanderMod.visible = value
+            end
+        }):AddColorPicker('HitboxColor', {
+            Default = Color3.new(1, 0, 0),
+            Title = 'Hitbox Color',
+            Callback = function(value)
+                hitboxExpanderMod.color = value
+            end
+        })
+        
+        -- Настраиваем зависимости
+        ExpandHitboxDepbox:SetupDependencies({
+            { Toggles.ExpandHitbox, true }
+        })
+        
+        
+        -- Инициализируем настройки SilentAim, ForceHit, Magic Bullets, Multi Weapon, Wallbang, NoSpread, RapidFire и ExpandHitbox
         _G.silent_aim_enabled = false
         _G.forcehit_enabled = false
         _G.magic_bullets_enabled = false
@@ -1727,6 +1886,7 @@ do -- rage tab configuration
         _G.wallbang_enabled = false
         _G.nospread_enabled = false
         _G.rapidfire_enabled = false
+        _G.hitbox_expander_enabled = false
         _G.prediction_xz = 0.1
         _G.prediction_y = 0.1
         _G.resolver_type = 'Velocity'
@@ -1743,6 +1903,10 @@ do -- rage tab configuration
             -- Обновляем ForceHit цель только если ForceHit включен
             if _G.forcehit_enabled and _G.updateForceHitTarget then
                 _G.updateForceHitTarget()
+            end
+            -- Обновляем хитбоксы только если ExpandHitbox включен
+            if hitboxExpanderMod.enabled and _G.HitboxExpanderUtility then
+                _G.HitboxExpanderUtility:UpdateHitboxes()
             end
         end)
     end
