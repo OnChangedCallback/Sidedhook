@@ -1,5 +1,11 @@
 -- variables
 local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/'
+local game, workspace = game, workspace
+local Vector3, Vector2, CFrame, Color3 = Vector3, Vector2, CFrame, Color3
+local Enum = Enum
+local math, tick, pairs, pcall, tostring, tonumber = math, tick, pairs, pcall, tostring, tonumber
+local getrawmetatable, setreadonly, checkcaller, hookmetamethod, newcclosure, getnamecallmethod = getrawmetatable, setreadonly, checkcaller, hookmetamethod, newcclosure, getnamecallmethod
+local loadstring, setclipboard = loadstring, setclipboard
 local TeleportService, HttpService, Players, RunService = game:GetService("TeleportService"), game:GetService("HttpService"), game:GetService("Players"), game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
@@ -485,59 +491,8 @@ do -- rage tab configuration
                 return
             end
             
-            -- Получаем предсказанную позицию (координаты аиминга)
-            local targetPart = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if not targetPart then
-                _G.aimbot_tracer.Visible = false
-                _G.aimbot_tracer_outline.Visible = false
-                return
-            end
-            
-            local lastPositions, lastUpdateTimes = {}, {}
-            local function predictPosition(player)
-                if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return nil end
-                local aimPart = player.Character.HumanoidRootPart
-                local aimPartPos = aimPart.Position
-                local playerId = player.UserId
-                
-                if not lastPositions[playerId] or not lastUpdateTimes[playerId] then
-                    lastPositions[playerId] = aimPartPos
-                    lastUpdateTimes[playerId] = tick()
-                    return aimPartPos
-                end
-                
-                local currentTime = tick()
-                local deltaTime = currentTime - lastUpdateTimes[playerId]
-                local predictedPos
-                local resolverType = _G.resolver_type
-                
-                if resolverType == "Velocity" then
-                    local velocity = aimPart.Velocity
-                    predictedPos = aimPartPos + Vector3.new(
-                        velocity.X * _G.prediction_xz,
-                        velocity.Y * _G.prediction_y,
-                        velocity.Z * _G.prediction_xz
-                    )
-                elseif resolverType == "Move direction" then
-                    predictedPos = aimPartPos + (player.Character.Humanoid.MoveDirection * (_G.prediction_xz * 10))
-                elseif resolverType == "Calculate Cframe" then
-                    local distance = (aimPartPos - lastPositions[playerId]).Magnitude
-                    if distance < 0.001 then
-                        predictedPos = aimPartPos
-                    else
-                        local predictedDistance = (distance / deltaTime) * (0.1 * (_G.prediction_xz * 10))
-                        predictedPos = aimPartPos + (aimPartPos - lastPositions[playerId]).Unit * predictedDistance
-                        local yChange = (aimPartPos.Y - lastPositions[playerId].Y) / deltaTime * (0.1 * _G.prediction_y)
-                        predictedPos = predictedPos + Vector3.new(0, yChange, 0)
-                    end
-                end
-                
-                lastPositions[playerId] = aimPartPos
-                lastUpdateTimes[playerId] = currentTime
-                return predictedPos
-            end
-            
-            local aimPos = predictPosition(targetPlayer)
+            -- Используем глобальную функцию предсказания
+            local aimPos = _G.predictPosition(targetPlayer)
             if not aimPos then
                 _G.aimbot_tracer.Visible = false
                 _G.aimbot_tracer_outline.Visible = false
@@ -571,7 +526,6 @@ do -- rage tab configuration
         end
         
         -- Подключаем обновление трейсера к Heartbeat
-        local RunService = game:GetService("RunService")
         _G.tracer_update_connection = RunService.Heartbeat:Connect(updateTracer)
     end
     
