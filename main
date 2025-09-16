@@ -95,7 +95,7 @@ local Window = Library:CreateWindow({
 -- tabs
 local Tabs = {
     ['Rage'] = Window:AddTab('Rage'),
-    ['UI Settings'] = Window:AddTab('UI Settings'),
+    ['UI Settings'] = Window:AddTab('Settings'),
     
 }
 
@@ -327,7 +327,7 @@ do -- rage tab configuration
             if utility:ValidateClient(player) then
                 targeting_state.current = player
                 local koStatus = utility:isPlayerKO(player)
-                Library:Notify('Target: ' .. player.Name .. ' | isKO: ' .. tostring(koStatus), 2)
+                Library:Notify('ragetbot set to: ' .. player.Name .. ' | isKO: ' .. tostring(koStatus), 2)
                 return true
             else
                 targeting_state.current = nil
@@ -567,14 +567,14 @@ do -- rage tab configuration
                     if _G.targeting_state.current then
                         -- Если есть цель, сбрасываем её
                         _G.targeting_state.current = nil
-                        Library:Notify('Target cleared', 2)
+                        Library:Notify('Ragebot set to none', 2)
                     else
                         -- Если нет цели, ищем новую
                         local target = framework:GetClosestTarget()
                         if target then
                             framework:SetTarget(target)
                         else
-                            Library:Notify('No targets found', 2)
+                            Library:Notify('Notargetsfound', 2)
                         end
                     end
                 end
@@ -584,27 +584,13 @@ do -- rage tab configuration
         TargetingGroup:AddToggle('SilentAim', {
             Text = 'SilentAim',
             Default = false,
-            Tooltip = 'Silent aim on selected target',
+            Tooltip = '>_<',
             Callback = function(value)
                 _G.silent_aim_enabled = value
                 if value then
-                    Library:Notify('SilentAim enabled', 2)
+                    Library:Notify('on', 2)
                 else
-                    Library:Notify('SilentAim disabled', 2)
-                end
-            end
-        })
-        
-        TargetingGroup:AddToggle('ForceHit', {
-            Text = 'ForceHit',
-            Default = false,
-            Tooltip = 'Force bullets to hit selected target',
-            Callback = function(value)
-                _G.forcehit_enabled = value
-                if value then
-                    Library:Notify('ForceHit enabled', 2)
-                else
-                    Library:Notify('ForceHit disabled', 2)
+                    Library:Notify('off', 2)
                 end
             end
         })
@@ -617,7 +603,7 @@ do -- rage tab configuration
             Numeric = true,
             Finished = false,
             Text = 'Prediction XZ',
-            Tooltip = 'Prediction value for X and Z axis',
+            Tooltip = '>_<',
             Callback = function(value)
                 _G.prediction_xz = tonumber(value) or 0.1
             end
@@ -628,7 +614,7 @@ do -- rage tab configuration
             Numeric = true,
             Finished = false,
             Text = 'Prediction Y',
-            Tooltip = 'Prediction value for Y axis',
+            Tooltip = '>_<',
             Callback = function(value)
                 _G.prediction_y = tonumber(value) or 0.1
             end
@@ -639,7 +625,7 @@ do -- rage tab configuration
             Default = 1,
             Multi = false,
             Text = 'Resolver Type',
-            Tooltip = 'Type of movement resolver',
+            Tooltip = '>_<',
             Callback = function(value)
                 _G.resolver_type = value
             end
@@ -648,7 +634,7 @@ do -- rage tab configuration
         SilentAimDepbox:AddToggle('ShowAimbot', {
             Text = 'Show Aimbot',
             Default = false,
-            Tooltip = 'Show tracer from tool handle to aim position',
+            Tooltip = '>_<',
             Callback = function(value)
                 _G.show_aimbot = value
                 -- Немедленно скрываем трейсер при отключении
@@ -686,6 +672,20 @@ do -- rage tab configuration
             { Toggles.SilentAim, true }
         })
         
+        TargetingGroup:AddToggle('ForceHit', {
+            Text = 'ForceHit',
+            Default = false,
+            Tooltip = '>_<',
+            Callback = function(value)
+                _G.forcehit_enabled = value
+                if value then
+                    Library:Notify('on', 2)
+                else
+                    Library:Notify('off', 2)
+                end
+            end
+        })
+        
         -- Инициализируем настройки SilentAim и ForceHit
         _G.silent_aim_enabled = false
         _G.forcehit_enabled = false
@@ -716,7 +716,7 @@ do -- rage tab configuration
         SkipsGroup:AddToggle('SkipKO', {
             Text = 'K.O',
             Default = true,
-            Tooltip = 'Skip targets with K.O status',
+            Tooltip = '>_<',
             Callback = function(value)
                 _G.skip_ko = value
             end
