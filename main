@@ -4,7 +4,7 @@ local game, workspace = game, workspace
 local Vector3, Vector2, CFrame, Color3, Instance = Vector3, Vector2, CFrame, Color3, Instance
 local Enum = Enum
 local math, tick, pairs, pcall, tostring, tonumber, ipairs, table = math, tick, pairs, pcall, tostring, tonumber, ipairs, table
-local getrawmetatable, setreadonly, checkcaller, hookmetamethod, newcclosure, getnamecallmethod, hookfunction = getrawmetatable, setreadonly, checkcaller, hookmetamethod, newcclosure, getnamecallmethod, hookfunction
+local getrawmetatable, setreadonly, checkcaller, hookmetamethod, newcclosure, getnamecallmethod, hookfunction, debug, getconnections = getrawmetatable, setreadonly, checkcaller, hookmetamethod, newcclosure, getnamecallmethod, hookfunction, debug, getconnections
 local loadstring, setclipboard = loadstring, setclipboard
 local TeleportService, HttpService, Players, RunService, UserInputService = game:GetService("TeleportService"), game:GetService("HttpService"), game:GetService("Players"), game:GetService("RunService"), game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
@@ -34,6 +34,12 @@ local forceHitTarget = {
 local spreadMod = {
     enabled = false,
     amount = 100
+}
+
+-- rapidfire variables
+local rapidFireMod = {
+    enabled = false,
+    speed = 0.00000000000000000001
 }
 
 local Hooks = {}
@@ -443,6 +449,13 @@ do -- rage tab configuration
                     local tool = character:FindFirstChildOfClass("Tool")
                     if tool and spreadMod.enabled then
                         local isMarked, toolSpread = noSpreadUtility:isWeaponMarked(tool)
+                        
+                        -- Автоматически маркируем новые оружия при взятии в руки
+                        if not isMarked then
+                            noSpreadUtility:markWeapon(tool)
+                            isMarked = true
+                        end
+                        
                         if isMarked then
                             -- Обновляем spread файл если нужно
                             noSpreadUtility:updateWeaponSpread(tool)
@@ -518,6 +531,240 @@ do -- rage tab configuration
         end
         
         _G.NoSpreadUtility = noSpreadUtility
+    end
+    
+    -- rapidfire utility
+    do
+        local rapidFireUtility = {}
+        local originalValues = {}
+        local renderConnection = nil
+        
+        function rapidFireUtility:markWeapon(tool)
+            if not tool or not tool:IsA("Tool") then return false end
+            
+            -- Создаем файл с именем равным значению speed
+            local speedFile = Instance.new("StringValue")
+            speedFile.Name = tostring(rapidFireMod.speed)
+            speedFile.Value = "rapidfire_marker"
+            speedFile.Parent = tool
+            
+            return true
+        end
+        
+        function rapidFireUtility:isWeaponMarked(tool)
+            if not tool or not tool:IsA("Tool") then return false end
+            
+            -- Ищем любой файл-маркер rapidfire
+            for _, child in pairs(tool:GetChildren()) do
+                if child:IsA("StringValue") and child.Value == "rapidfire_marker" then
+                    return true, child.Name
+                end
+            end
+            return false, nil
+        end
+        
+        function rapidFireUtility:updateWeaponSpeed(tool)
+            if not tool or not tool:IsA("Tool") then return end
+            
+            local isMarked, currentSpeed = rapidFireUtility:isWeaponMarked(tool)
+            if isMarked and currentSpeed ~= tostring(rapidFireMod.speed) then
+                -- Удаляем старый маркер
+                for _, child in pairs(tool:GetChildren()) do
+                    if child:IsA("StringValue") and child.Value == "rapidfire_marker" then
+                        child:Destroy()
+                    end
+                end
+                -- Создаем новый с актуальным значением
+                rapidFireUtility:markWeapon(tool)
+            end
+        end
+        
+        function rapidFireUtility:processWeapon(tool)
+            if not tool or not tool:FindFirstChild("GunScript") then return end
+            
+            local isMarked = rapidFireUtility:isWeaponMarked(tool)
+            if not isMarked then return end
+            
+            -- Обновляем маркер если нужно
+            rapidFireUtility:updateWeaponSpeed(tool)
+            
+            -- Обрабатываем connections только если RapidFire включен
+            if rapidFireMod.enabled then
+                for _, connection in ipairs(getconnections(tool.Activated)) do
+                    local func = connection.Function
+                    if func then
+                        local funcInfo = debug.getinfo(func)
+                        for i = 1, funcInfo.nups do
+                            local c, n = debug.getupvalue(func, i)
+                            if type(c) == "number" then
+                                -- Сохраняем оригинальное значение
+                                local key = tostring(func) .. "_" .. i
+                                if not originalValues[key] then
+                                    originalValues[key] = c
+                                end
+                                -- Устанавливаем новое значение
+                                debug.setupvalue(func, i, rapidFireMod.speed)
+                            end
+                        end
+                    end
+                end
+            else
+                -- Восстанавливаем оригинальные значения если RapidFire выключен
+                for _, connection in ipairs(getconnections(tool.Activated)) do
+                    local func = connection.Function
+                    if func then
+                        local funcInfo = debug.getinfo(func)
+                        for i = 1, funcInfo.nups do
+                            local c, n = debug.getupvalue(func, i)
+                            if type(c) == "number" then
+                                local key = tostring(func) .. "_" .. i
+                                if originalValues[key] then
+                                    debug.setupvalue(func, i, originalValues[key])
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        
+        function rapidFireUtility:enable()
+            if renderConnection then return end
+            
+            -- Маркируем все оружия
+            rapidFireUtility:markAllWeapons()
+            
+            -- Создаем RenderStepped connection
+            renderConnection = RunService.RenderStepped:Connect(function()
+                local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+                if tool then
+                    -- Автоматически маркируем новые оружия при взятии в руки
+                    local isMarked = rapidFireUtility:isWeaponMarked(tool)
+                    if not isMarked then
+                        rapidFireUtility:markWeapon(tool)
+                    end
+                    rapidFireUtility:processWeapon(tool)
+                end
+            end)
+        end
+        
+        function rapidFireUtility:disable()
+            -- Отключаем RenderStepped connection
+            if renderConnection then
+                renderConnection:Disconnect()
+                renderConnection = nil
+            end
+            
+            -- Восстанавливаем оригинальные значения для всех оружий
+            local character = LocalPlayer.Character
+            if character then
+                for _, tool in pairs(character:GetChildren()) do
+                    if tool:IsA("Tool") and tool:FindFirstChild("GunScript") then
+                        rapidFireUtility:restoreOriginalValues(tool)
+                    end
+                end
+            end
+            
+            local backpack = LocalPlayer:FindFirstChild("Backpack")
+            if backpack then
+                for _, tool in pairs(backpack:GetChildren()) do
+                    if tool:IsA("Tool") and tool:FindFirstChild("GunScript") then
+                        rapidFireUtility:restoreOriginalValues(tool)
+                    end
+                end
+            end
+            
+            -- Удаляем все маркеры RapidFire
+            rapidFireUtility:removeAllMarkers()
+            
+            -- Очищаем сохраненные оригинальные значения
+            originalValues = {}
+        end
+        
+        function rapidFireUtility:restoreOriginalValues(tool)
+            if not tool or not tool:FindFirstChild("GunScript") then return end
+            
+            for _, connection in ipairs(getconnections(tool.Activated)) do
+                local func = connection.Function
+                if func then
+                    local funcInfo = debug.getinfo(func)
+                    for i = 1, funcInfo.nups do
+                        local c, n = debug.getupvalue(func, i)
+                        if type(c) == "number" then
+                            local key = tostring(func) .. "_" .. i
+                            if originalValues[key] then
+                                debug.setupvalue(func, i, originalValues[key])
+                                originalValues[key] = nil -- Удаляем после восстановления
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        
+        function rapidFireUtility:removeAllMarkers()
+            -- Удаляем маркеры со всех оружий в персонаже
+            local character = LocalPlayer.Character
+            if character then
+                for _, tool in pairs(character:GetChildren()) do
+                    if tool:IsA("Tool") then
+                        for _, child in pairs(tool:GetChildren()) do
+                            if child:IsA("StringValue") and child.Value == "rapidfire_marker" then
+                                child:Destroy()
+                            end
+                        end
+                    end
+                end
+            end
+            
+            -- Удаляем маркеры со всех оружий в рюкзаке
+            local backpack = LocalPlayer:FindFirstChild("Backpack")
+            if backpack then
+                for _, tool in pairs(backpack:GetChildren()) do
+                    if tool:IsA("Tool") then
+                        for _, child in pairs(tool:GetChildren()) do
+                            if child:IsA("StringValue") and child.Value == "rapidfire_marker" then
+                                child:Destroy()
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        
+        function rapidFireUtility:markAllWeapons()
+            -- Маркируем все оружия в персонаже
+            local character = LocalPlayer.Character
+            if character then
+                for _, tool in pairs(character:GetChildren()) do
+                    if tool:IsA("Tool") then
+                        local isMarked = rapidFireUtility:isWeaponMarked(tool)
+                        if not isMarked then
+                            rapidFireUtility:markWeapon(tool)
+                        else
+                            rapidFireUtility:updateWeaponSpeed(tool)
+                        end
+                    end
+                end
+            end
+            
+            -- Маркируем все оружия в рюкзаке
+            local backpack = LocalPlayer:FindFirstChild("Backpack")
+            if backpack then
+                for _, tool in pairs(backpack:GetChildren()) do
+                    if tool:IsA("Tool") then
+                        local isMarked = rapidFireUtility:isWeaponMarked(tool)
+                        if not isMarked then
+                            rapidFireUtility:markWeapon(tool)
+                        else
+                            rapidFireUtility:updateWeaponSpeed(tool)
+                        end
+                    end
+                end
+            end
+        end
+        
+        _G.RapidFireUtility = rapidFireUtility
     end
     
     -- forcehit functionality
@@ -1448,7 +1695,29 @@ do -- rage tab configuration
             { Toggles.NoSpread, true }
         })
         
-        -- Инициализируем настройки SilentAim, ForceHit, Magic Bullets, Multi Weapon, Wallbang и NoSpread
+        TargetingGroup:AddToggle('RapidFire', {
+            Text = 'RapidFire',
+            Default = false,
+            Tooltip = 'Увеличивает скорострельность оружия',
+            Callback = function(value)
+                _G.rapidfire_enabled = value
+                rapidFireMod.enabled = value
+                if value then
+                    if _G.RapidFireUtility then
+                        _G.RapidFireUtility:enable()
+                    end
+                    Library:Notify('RapidFire on', 2)
+                else
+                    if _G.RapidFireUtility then
+                        _G.RapidFireUtility:disable()
+                    end
+                    Library:Notify('RapidFire off', 2)
+                end
+            end
+        })
+        
+        
+        -- Инициализируем настройки SilentAim, ForceHit, Magic Bullets, Multi Weapon, Wallbang, NoSpread и RapidFire
         _G.silent_aim_enabled = false
         _G.forcehit_enabled = false
         _G.magic_bullets_enabled = false
@@ -1457,6 +1726,7 @@ do -- rage tab configuration
         _G.multi_weapon_enabled = false
         _G.wallbang_enabled = false
         _G.nospread_enabled = false
+        _G.rapidfire_enabled = false
         _G.prediction_xz = 0.1
         _G.prediction_y = 0.1
         _G.resolver_type = 'Velocity'
