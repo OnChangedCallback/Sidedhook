@@ -3,11 +3,24 @@ local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main
 local game, workspace = game, workspace
 local Vector3, Vector2, CFrame, Color3 = Vector3, Vector2, CFrame, Color3
 local Enum = Enum
-local math, tick, pairs, pcall, tostring, tonumber = math, tick, pairs, pcall, tostring, tonumber
+local math, tick, pairs, pcall, tostring, tonumber, ipairs, table = math, tick, pairs, pcall, tostring, tonumber, ipairs, table
 local getrawmetatable, setreadonly, checkcaller, hookmetamethod, newcclosure, getnamecallmethod = getrawmetatable, setreadonly, checkcaller, hookmetamethod, newcclosure, getnamecallmethod
 local loadstring, setclipboard = loadstring, setclipboard
 local TeleportService, HttpService, Players, RunService = game:GetService("TeleportService"), game:GetService("HttpService"), game:GetService("Players"), game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
+
+-- multi weapon variables
+local allowed_tools = {
+    ["[AUG]"] = true,
+    ["[Rifle]"] = true,
+    ["[LMG]"] = true,
+    ["[P90]"] = true,
+    ["[Flintlock]"] = true,
+    ["[Revolver]"] = true,
+    ["[Double-Barrel SG]"] = true,
+    ["[AK47]"] = true,
+    ["[TacticalShotgun]"] = true,
+}
 
 -- forcehit variables
 local forceHitTarget = {
@@ -456,10 +469,33 @@ do -- rage tab configuration
             end
             
             if targetPlayer and targetPlayer.Character then
-                local bodyEffects = targetPlayer.Character:FindFirstChild("BodyEffects")
-                if bodyEffects and bodyEffects:FindFirstChild("K.O") then
-                    if bodyEffects["K.O"].Value then
-                        return false -- Цель в K.O, не стреляем
+                local checks = _G.magic_bullets_checks or {}
+                
+                -- Проверка K.O статуса (если включена)
+                if checks['K.O'] then
+                    local bodyEffects = targetPlayer.Character:FindFirstChild("BodyEffects")
+                    if bodyEffects and bodyEffects:FindFirstChild("K.O") then
+                        if bodyEffects["K.O"].Value then
+                            return false -- Цель в K.O, не стреляем
+                        end
+                    end
+                end
+                
+                -- Проверка Forcefield (если включена)
+                if checks['Forcefield'] then
+                    local humanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+                    if humanoid and humanoid:FindFirstChild("ForceField") then
+                        return false -- У цели есть forcefield, не стреляем
+                    end
+                end
+                
+                -- Проверка Grabbed статуса (если включена)
+                if checks['Grabbed'] then
+                    local bodyEffects = targetPlayer.Character:FindFirstChild("BodyEffects")
+                    if bodyEffects and bodyEffects:FindFirstChild("Grabbed") then
+                        if bodyEffects["Grabbed"].Value then
+                            return false -- Цель схвачена, не стреляем
+                        end
                     end
                 end
             end
@@ -551,6 +587,188 @@ do -- rage tab configuration
         end
         
         _G.MagicBulletsFramework = MagicBulletsFramework
+    end
+    
+    -- multi weapon utility
+    do
+        local multiWeaponUtility = {}
+        
+        local multiguns_state = {
+            enabled = false,
+            equipped_tools = {},
+            character = nil,
+            tool_added_conn = nil,
+            tool_removed_conn = nil,
+            char_added_conn = nil,
+            heartbeat_conn = nil,
+            character_spawn_time = 0,
+            spawn_delay = 2 -- Задержка 2 секунды после респавна
+        }
+        
+        -- Проверка полной загрузки оружия
+        function multiWeaponUtility:isToolFullyLoaded(tool)
+            if not tool or not tool:IsA("Tool") then
+                return false
+            end
+            
+            -- Проверяем основные компоненты
+            local handle = tool:FindFirstChild("Handle")
+            if not handle then
+                return false
+            end
+            
+            -- Проверяем наличие важных компонентов для оружия
+            local hasAmmo = tool:FindFirstChild("Ammo") or tool:FindFirstChild("MaxAmmo") or tool:FindFirstChild("CurrentAmmo")
+            local hasScript = tool:FindFirstChild("LocalScript") or tool:FindFirstChild("Script")
+            
+            -- Для полной загрузки нужны Handle и хотя бы один из компонентов
+            return handle and (hasAmmo or hasScript)
+        end
+        
+        -- Экипировка всех оружий
+        function multiWeaponUtility:equipAllWeapons()
+            if not multiguns_state.character or not multiguns_state.character.Parent then
+                return
+            end
+            
+            -- Проверяем задержку после респавна
+            local now = tick()
+            if now - multiguns_state.character_spawn_time < multiguns_state.spawn_delay then
+                return -- Ждем полной загрузки после респавна
+            end
+            
+            multiguns_state.equipped_tools = {}
+            
+            local backpack = LocalPlayer:FindFirstChild("Backpack")
+            if backpack then
+                for _, tool in ipairs(backpack:GetChildren()) do
+                    if tool:IsA("Tool") and allowed_tools[tool.Name] and tool.Parent == backpack then
+                        -- Проверяем полную загрузку оружия перед экипировкой
+                        if self:isToolFullyLoaded(tool) then
+                            pcall(function()
+                                tool.Parent = multiguns_state.character
+                            end)
+                        end
+                    end
+                end
+            end
+            
+            if multiguns_state.character then
+                for _, tool in ipairs(multiguns_state.character:GetChildren()) do
+                    if tool:IsA("Tool") and allowed_tools[tool.Name] and tool:FindFirstChild("Handle") then
+                        table.insert(multiguns_state.equipped_tools, tool)
+                    end
+                end
+            end
+        end
+        
+        -- Получение экипированных оружий
+        function multiWeaponUtility:getEquippedWeapons()
+            return multiguns_state.equipped_tools
+        end
+        
+        -- Обработка добавления персонажа
+        function multiWeaponUtility:onCharacterAdded(new_char)
+            if not new_char or not new_char.Parent then
+                return
+            end
+            
+            multiguns_state.character = new_char
+            multiguns_state.character_spawn_time = tick() -- Записываем время респавна
+            
+            if multiguns_state.tool_added_conn then 
+                pcall(function() multiguns_state.tool_added_conn:Disconnect() end)
+            end
+            if multiguns_state.tool_removed_conn then 
+                pcall(function() multiguns_state.tool_removed_conn:Disconnect() end)
+            end
+            
+            multiguns_state.tool_added_conn = new_char.ChildAdded:Connect(function(child)
+                if child:IsA("Tool") and allowed_tools[child.Name] and child:FindFirstChild("Handle") then
+                    pcall(function()
+                        table.insert(multiguns_state.equipped_tools, child)
+                    end)
+                end
+            end)
+            
+            multiguns_state.tool_removed_conn = new_char.ChildRemoved:Connect(function(child)
+                if child:IsA("Tool") then
+                    pcall(function()
+                        for i, tool in ipairs(multiguns_state.equipped_tools) do
+                            if tool == child then
+                                table.remove(multiguns_state.equipped_tools, i)
+                                break
+                            end
+                        end
+                    end)
+                end
+            end)
+            
+            if multiguns_state.enabled then
+                pcall(function()
+                    self:equipAllWeapons()
+                end)
+            end
+        end
+        
+        function multiWeaponUtility:enable()
+            multiguns_state.enabled = true
+            multiguns_state.character = LocalPlayer.Character
+            multiguns_state.last_equip_time = 0
+            
+            if multiguns_state.character then
+                self:onCharacterAdded(multiguns_state.character)
+            end
+            
+            -- Подключаемся к событию добавления персонажа
+            if not multiguns_state.char_added_conn then
+                multiguns_state.char_added_conn = LocalPlayer.CharacterAdded:Connect(function(new_char)
+                    self:onCharacterAdded(new_char)
+                end)
+            end
+            
+            -- Циклическая экипировка оружий с задержкой
+            multiguns_state.heartbeat_conn = RunService.Heartbeat:Connect(function()
+                if not multiguns_state.enabled then return end
+                if not multiguns_state.character or not multiguns_state.character.Parent then return end
+                
+                local now = tick()
+                if now - (multiguns_state.last_equip_time or 0) >= 0.1 then -- Задержка 0.1 секунды
+                    multiguns_state.last_equip_time = now
+                    pcall(function()
+                        self:equipAllWeapons()
+                    end)
+                end
+            end)
+        end
+        
+        function multiWeaponUtility:disable()
+            multiguns_state.enabled = false
+            
+            if multiguns_state.heartbeat_conn then
+                multiguns_state.heartbeat_conn:Disconnect()
+                multiguns_state.heartbeat_conn = nil
+            end
+            
+            if multiguns_state.tool_added_conn then
+                multiguns_state.tool_added_conn:Disconnect()
+                multiguns_state.tool_added_conn = nil
+            end
+            
+            if multiguns_state.tool_removed_conn then
+                multiguns_state.tool_removed_conn:Disconnect()
+                multiguns_state.tool_removed_conn = nil
+            end
+            
+            if multiguns_state.char_added_conn then
+                multiguns_state.char_added_conn:Disconnect()
+                multiguns_state.char_added_conn = nil
+            end
+            
+            multiguns_state.equipped_tools = {}
+        end
+        
+        _G.MultiWeaponUtility = multiWeaponUtility
     end
     
     -- silent aim prediction logic
@@ -866,6 +1084,17 @@ do -- rage tab configuration
         -- Создаем dependency box для настроек Magic Bullets
         local MagicBulletsDepbox = TargetingGroup:AddDependencyBox()
         
+        MagicBulletsDepbox:AddDropdown('MagicBulletsChecks', {
+            Values = {'Forcefield', 'K.O', 'Grabbed'},
+            Default = {'Forcefield', 'K.O', 'Grabbed'},
+            Multi = true,
+            Text = 'Checks',
+            Tooltip = 'Выберите какие проверки использовать',
+            Callback = function(value)
+                _G.magic_bullets_checks = value
+            end
+        })
+        
         MagicBulletsDepbox:AddDropdown('MagicBulletsMode', {
             Values = {'Target', 'Killaura'},
             Default = 1,
@@ -882,11 +1111,33 @@ do -- rage tab configuration
             { Toggles.MagicBullets, true }
         })
         
-        -- Инициализируем настройки SilentAim, ForceHit и Magic Bullets
+        TargetingGroup:AddToggle('MultiWeapon', {
+            Text = 'Multi Weapon',
+            Default = false,
+            Tooltip = 'Экипирует все доступные оружия одновременно',
+            Callback = function(value)
+                _G.multi_weapon_enabled = value
+                if value then
+                    if _G.MultiWeaponUtility then
+                        _G.MultiWeaponUtility:enable()
+                    end
+                    Library:Notify('Multi Weapon on', 2)
+                else
+                    if _G.MultiWeaponUtility then
+                        _G.MultiWeaponUtility:disable()
+                    end
+                    Library:Notify('Multi Weapon off', 2)
+                end
+            end
+        })
+        
+        -- Инициализируем настройки SilentAim, ForceHit, Magic Bullets и Multi Weapon
         _G.silent_aim_enabled = false
         _G.forcehit_enabled = false
         _G.magic_bullets_enabled = false
         _G.magic_bullets_mode = 'Target'
+        _G.magic_bullets_checks = {['Forcefield'] = true, ['K.O'] = true, ['Grabbed'] = true}
+        _G.multi_weapon_enabled = false
         _G.prediction_xz = 0.1
         _G.prediction_y = 0.1
         _G.resolver_type = 'Velocity'
