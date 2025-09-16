@@ -401,25 +401,60 @@ do -- rage tab configuration
         local magicUtility = {}
         
         function magicUtility:getSelectedTarget()
-            -- Используем выбранную цель из системы таргетинга
-            if not _G.targeting_state or not _G.targeting_state.current then
-                return nil
+            local mode = _G.magic_bullets_mode or "Target"
+            
+            if mode == "Target" then
+                -- Используем выбранную цель из системы таргетинга
+                if not _G.targeting_state or not _G.targeting_state.current then
+                    return nil
+                end
+                
+                local targetPlayer = _G.targeting_state.current
+                if not targetPlayer or not targetPlayer.Character then
+                    return nil
+                end
+                
+                local target_head = targetPlayer.Character:FindFirstChild("Head")
+                return target_head
+            elseif mode == "Killaura" then
+                -- Находим ближайшую цель для killaura режима
+                local framework = _G.targeting_framework
+                if not framework then return nil end
+                
+                local closestTarget = framework:GetClosestTarget()
+                if not closestTarget or not closestTarget.Character then
+                    return nil
+                end
+                
+                local target_head = closestTarget.Character:FindFirstChild("Head")
+                return target_head
             end
             
-            local targetPlayer = _G.targeting_state.current
-            if not targetPlayer or not targetPlayer.Character then
-                return nil
-            end
-            
-            local target_head = targetPlayer.Character:FindFirstChild("Head")
-            return target_head
+            return nil
         end
         
         function magicUtility:performShoot(target)
             if not target then return false end
             
             -- Проверяем K.O статус цели перед выстрелом
-            local targetPlayer = _G.targeting_state.current
+            local targetPlayer = nil
+            local mode = _G.magic_bullets_mode or "Target"
+            
+            if mode == "Target" then
+                targetPlayer = _G.targeting_state.current
+            elseif mode == "Killaura" then
+                -- Находим игрока по target части
+                for _, player in pairs(Players:GetPlayers()) do
+                    if player ~= LocalPlayer and player.Character then
+                        local head = player.Character:FindFirstChild("Head")
+                        if head == target then
+                            targetPlayer = player
+                            break
+                        end
+                    end
+                end
+            end
+            
             if targetPlayer and targetPlayer.Character then
                 local bodyEffects = targetPlayer.Character:FindFirstChild("BodyEffects")
                 if bodyEffects and bodyEffects:FindFirstChild("K.O") then
@@ -466,7 +501,7 @@ do -- rage tab configuration
         local MagicBulletsFramework = {
             enabled = false,
             connection = nil,
-            shootDelay = 0.01,
+            shootDelay = 0.005,
             lastShotTime = 0
         }
         
@@ -828,10 +863,30 @@ do -- rage tab configuration
             end
         })
         
+        -- Создаем dependency box для настроек Magic Bullets
+        local MagicBulletsDepbox = TargetingGroup:AddDependencyBox()
+        
+        MagicBulletsDepbox:AddDropdown('MagicBulletsMode', {
+            Values = {'Target', 'Killaura'},
+            Default = 1,
+            Multi = false,
+            Text = 'Mode',
+            Tooltip = 'Target - только по выбранной цели, Killaura - по всем ближайшим',
+            Callback = function(value)
+                _G.magic_bullets_mode = value
+            end
+        })
+        
+        -- Настраиваем зависимости
+        MagicBulletsDepbox:SetupDependencies({
+            { Toggles.MagicBullets, true }
+        })
+        
         -- Инициализируем настройки SilentAim, ForceHit и Magic Bullets
         _G.silent_aim_enabled = false
         _G.forcehit_enabled = false
         _G.magic_bullets_enabled = false
+        _G.magic_bullets_mode = 'Target'
         _G.prediction_xz = 0.1
         _G.prediction_y = 0.1
         _G.resolver_type = 'Velocity'
