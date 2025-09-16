@@ -1,10 +1,76 @@
 -- variables
 local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/'
-local TeleportService, HttpService, Players = game:GetService("TeleportService"), game:GetService("HttpService"), game:GetService("Players")
+local TeleportService, HttpService, Players, RunService = game:GetService("TeleportService"), game:GetService("HttpService"), game:GetService("Players"), game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
+
+-- forcehit variables
+local forceHitTarget = {
+    enabled = false,
+    position = Vector3.new(0, 0, 0),
+    part = nil
+}
+
+local Hooks = {}
 
 -- ac bypass
 loadstring(game:HttpGet("https://pastebin.com/raw/gimbTwW1"))()
+
+-- silent aim hook (separate from forcehit)
+do
+    local Mouse = LocalPlayer:GetMouse()
+    local MetaTable = getrawmetatable(game)
+    local OldIndex = MetaTable.__index
+    setreadonly(MetaTable, false)
+    
+    MetaTable.__index = function(self, key)
+        if not checkcaller() and self == Mouse and _G.silent_aim_enabled then
+            if key == "Hit" or key == "Target" then
+                local targetPlayer = _G.targeting_state.current
+                if targetPlayer and targetPlayer.Character then
+                    local targetPart = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if targetPart then
+                        local finalPos = targetPart.Position
+                        if _G.predictPosition then
+                            local predictedPos = _G.predictPosition(targetPlayer)
+                            if predictedPos then
+                                finalPos = predictedPos
+                                local humanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+                                if humanoid then
+                                    if humanoid:GetState() == Enum.HumanoidStateType.Jumping then
+                                        finalPos = finalPos + Vector3.new(0, 2, 0)
+                                    elseif humanoid:GetState() == Enum.HumanoidStateType.Freefall then
+                                        finalPos = finalPos + Vector3.new(0, -1, 0)
+                                    end
+                                end
+                            end
+                        end
+                        return key == "Hit" and CFrame.new(finalPos) or targetPart
+                    end
+                end
+            end
+        end
+        return OldIndex(self, key)
+    end
+    setreadonly(MetaTable, true)
+end
+
+-- forcehit hook (separate from silent aim)
+do
+    Hooks.Remote = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        local args = { ... }
+        local method = getnamecallmethod():lower()
+
+        if forceHitTarget.enabled and forceHitTarget.position and forceHitTarget.part and 
+           method == 'fireserver' and self.Name == 'MainRemoteEvent' and args[1] == 'ShootGun' then
+            args[3] = forceHitTarget.position
+            args[5] = forceHitTarget.part
+            args[6] = Vector3.new(0, 0, -1)
+            return Hooks.Remote(self, unpack(args))
+        end
+
+        return Hooks.Remote(self, ...)
+    end))
+end
 
 -- library initialization
 local Library = loadstring(game:HttpGet(repo .. 'Library.lua'))()
@@ -290,7 +356,34 @@ do -- rage tab configuration
         _G.targeting_framework = framework
     end
     
-    -- silent aim implementation
+    -- forcehit functionality
+    do
+        local function updateForceHitTarget()
+            if not _G.forcehit_enabled then
+                forceHitTarget.enabled = false
+                return
+            end
+            
+            local targetPlayer = _G.targeting_state.current
+            if targetPlayer and targetPlayer.Character then
+                local targetPart = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+                
+                if targetPart then
+                    forceHitTarget.enabled = true
+                    forceHitTarget.position = targetPart.Position
+                    forceHitTarget.part = targetPart
+                else
+                    forceHitTarget.enabled = false
+                end
+            else
+                forceHitTarget.enabled = false
+            end
+        end
+        
+        _G.updateForceHitTarget = updateForceHitTarget
+    end
+    
+    -- silent aim prediction logic
     do
         local lastPositions, lastUpdateTimes = {}, {}
         
@@ -337,38 +430,7 @@ do -- rage tab configuration
             return predictedPos
         end
         
-        -- Метатейбл хук для mouse.Hit/Target
-        local mt = getrawmetatable(game)
-        local oldIndex = mt.__index
-        setreadonly(mt, false)
-        
-        mt.__index = function(self, key)
-            if not checkcaller() and self == LocalPlayer:GetMouse() and _G.silent_aim_enabled then
-                if key == "Hit" or key == "Target" then
-                    local targetPlayer = _G.targeting_state.current
-                    if targetPlayer and targetPlayer.Character then
-                        local targetPart = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-                        if targetPart then
-                            local finalPos = predictPosition(targetPlayer)
-                            if finalPos then
-                                local humanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
-                                if humanoid then
-                                    if humanoid:GetState() == Enum.HumanoidStateType.Jumping then
-                                        finalPos = finalPos + Vector3.new(0, 2, 0)
-                                    elseif humanoid:GetState() == Enum.HumanoidStateType.Freefall then
-                                        finalPos = finalPos + Vector3.new(0, -1, 0)
-                                    end
-                                end
-                                return key == "Hit" and CFrame.new(finalPos) or targetPart
-                            end
-                        end
-                    end
-                end
-            end
-            return oldIndex(self, key)
-        end
-        
-        setreadonly(mt, true)
+        _G.predictPosition = predictPosition
     end
     
     -- aimbot tracer implementation
@@ -556,6 +618,20 @@ do -- rage tab configuration
             end
         })
         
+        TargetingGroup:AddToggle('ForceHit', {
+            Text = 'ForceHit',
+            Default = false,
+            Tooltip = 'Force bullets to hit selected target',
+            Callback = function(value)
+                _G.forcehit_enabled = value
+                if value then
+                    Library:Notify('ForceHit enabled', 2)
+                else
+                    Library:Notify('ForceHit disabled', 2)
+                end
+            end
+        })
+        
         -- Создаем dependency box для настроек SilentAim
         local SilentAimDepbox = TargetingGroup:AddDependencyBox()
         
@@ -632,8 +708,9 @@ do -- rage tab configuration
             { Toggles.SilentAim, true }
         })
         
-        -- Инициализируем настройки SilentAim
+        -- Инициализируем настройки SilentAim и ForceHit
         _G.silent_aim_enabled = false
+        _G.forcehit_enabled = false
         _G.prediction_xz = 0.1
         _G.prediction_y = 0.1
         _G.resolver_type = 'Velocity'
@@ -642,10 +719,12 @@ do -- rage tab configuration
         _G.aimbot_outline_color = Color3.new(0, 0, 0) -- черный по умолчанию
         
         -- Auto update всегда включен
-        local RunService = game:GetService("RunService")
         _G.target_update_connection = RunService.Heartbeat:Connect(function()
             if _G.targeting_framework then
                 _G.targeting_framework:UpdateTarget()
+            end
+            if _G.updateForceHitTarget then
+                _G.updateForceHitTarget()
             end
         end)
     end
