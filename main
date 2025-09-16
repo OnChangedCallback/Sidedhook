@@ -50,6 +50,17 @@ local hitboxExpanderMod = {
     color = Color3.new(1, 0, 0)
 }
 
+-- infinity range variables
+local infinityRangeMod = {
+    enabled = false
+}
+
+-- auto reload variables
+local autoReloadMod = {
+    enabled = false,
+    reloadDelay = 1.0
+}
+
 local Hooks = {}
 
 loadstring(game:HttpGet("https://raw.githubusercontent.com/OnChangedCallback/Sidedhook/refs/heads/main/antileak"))()
@@ -1341,13 +1352,22 @@ do -- rage tab configuration
         _G.aimbot_tracer.Transparency = 1
         _G.aimbot_tracer.ZIndex = 1
         
-        -- Функция для получения handle позиции
-        local function getToolHandle()
+        -- Функция для получения muzzle позиции
+        local function getToolMuzzle()
             local character = LocalPlayer.Character
             if not character then return nil end
             local tool = character:FindFirstChildOfClass("Tool")
             if not tool or not tool:FindFirstChild("Handle") then return nil end
-            return tool.Handle.Position
+            
+            local handle = tool.Handle
+            -- Ищем Muzzle attachment внутри Handle
+            local muzzle = handle:FindFirstChild("Muzzle")
+            if muzzle then
+                return muzzle.WorldPosition
+            end
+            
+            -- Если Muzzle не найден, возвращаем позицию Handle как fallback
+            return handle.Position
         end
         
         -- Функция для обновления трейсера
@@ -1370,8 +1390,8 @@ do -- rage tab configuration
                 return
             end
             
-            local handlePos = getToolHandle()
-            if not handlePos then
+            local muzzlePos = getToolMuzzle()
+            if not muzzlePos then
                 _G.aimbot_tracer.Visible = false
                 _G.aimbot_tracer_outline.Visible = false
                 return
@@ -1387,11 +1407,11 @@ do -- rage tab configuration
             
             -- Конвертируем 3D позиции в 2D экранные координаты
             local camera = workspace.CurrentCamera
-            local handleScreenPos, handleOnScreen = camera:WorldToViewportPoint(handlePos)
+            local muzzleScreenPos, muzzleOnScreen = camera:WorldToViewportPoint(muzzlePos)
             local aimScreenPos, aimOnScreen = camera:WorldToViewportPoint(aimPos)
             
-            if handleOnScreen and aimOnScreen then
-                local fromPos = Vector2.new(handleScreenPos.X, handleScreenPos.Y)
+            if muzzleOnScreen and aimOnScreen then
+                local fromPos = Vector2.new(muzzleScreenPos.X, muzzleScreenPos.Y)
                 local toPos = Vector2.new(aimScreenPos.X, aimScreenPos.Y)
                 
                 -- Обновляем outline линию
@@ -1519,6 +1539,288 @@ do -- rage tab configuration
         end
 
         _G.HitboxExpanderUtility = hitboxExpanderUtility
+    end
+    
+    -- infinity range utility
+    do
+        local infinityRangeUtility = {}
+        local originalValues = {}
+        local connection = nil
+        
+        local function findRangeValues(weapon)
+            local rangeValues = {}
+            
+            -- Прямой поиск в оружии
+            local range = weapon:FindFirstChild("Range") or 
+                         weapon:FindFirstChild("MaxRange") or 
+                         weapon:FindFirstChild("Distance") or
+                         weapon:FindFirstChild("MaxDistance") or
+                         weapon:FindFirstChild("Reach")
+            if range then
+                table.insert(rangeValues, range)
+            end
+            
+            -- Поиск в Configuration/Settings
+            local config = weapon:FindFirstChild("Configuration") or 
+                          weapon:FindFirstChild("Settings") or
+                          weapon:FindFirstChild("Config") or
+                          weapon:FindFirstChild("Stats")
+            if config then
+                local configRange = config:FindFirstChild("Range") or 
+                                   config:FindFirstChild("MaxRange") or
+                                   config:FindFirstChild("Distance") or
+                                   config:FindFirstChild("MaxDistance") or
+                                   config:FindFirstChild("Reach") or
+                                   config:FindFirstChild("FireRange")
+                if configRange then
+                    table.insert(rangeValues, configRange)
+                end
+            end
+            
+            -- Поиск в Handle
+            local handle = weapon:FindFirstChild("Handle")
+            if handle then
+                local handleRange = handle:FindFirstChild("Range") or 
+                                   handle:FindFirstChild("MaxRange") or
+                                   handle:FindFirstChild("Distance")
+                if handleRange then
+                    table.insert(rangeValues, handleRange)
+                end
+                
+                -- Поиск в Handle/Configuration
+                local handleConfig = handle:FindFirstChild("Configuration") or 
+                                    handle:FindFirstChild("Settings")
+                if handleConfig then
+                    local hcRange = handleConfig:FindFirstChild("Range") or 
+                                   handleConfig:FindFirstChild("MaxRange") or
+                                   handleConfig:FindFirstChild("Distance")
+                    if hcRange then
+                        table.insert(rangeValues, hcRange)
+                    end
+                end
+            end
+            
+            -- Поиск в GunScript или аналогичных скриптах
+            local gunScript = weapon:FindFirstChild("GunScript") or 
+                             weapon:FindFirstChild("WeaponScript") or
+                             weapon:FindFirstChild("Script")
+            if gunScript then
+                local scriptRange = gunScript:FindFirstChild("Range") or 
+                                   gunScript:FindFirstChild("MaxRange")
+                if scriptRange then
+                    table.insert(rangeValues, scriptRange)
+                end
+            end
+            
+            return rangeValues
+        end
+        
+        local function updateRange(weapon)
+            local rangeValues = findRangeValues(weapon)
+            
+            for _, rangeValue in ipairs(rangeValues) do
+                if rangeValue:IsA("NumberValue") or rangeValue:IsA("IntValue") then
+                    local key = tostring(weapon) .. "_" .. tostring(rangeValue)
+                    if infinityRangeMod.enabled then
+                        if not originalValues[key] then
+                            originalValues[key] = rangeValue.Value
+                        end
+                        rangeValue.Value = 999999999999999999
+                    else
+                        if originalValues[key] then
+                            rangeValue.Value = originalValues[key]
+                        end
+                    end
+                end
+            end
+        end
+        
+        local function isAllowedWeapon(weaponName)
+            return allowed_tools[weaponName] == true
+        end
+        
+        function infinityRangeUtility:enable()
+            infinityRangeMod.enabled = true
+            
+            if not connection then
+                connection = RunService.Heartbeat:Connect(function()
+                    if not infinityRangeMod.enabled then
+                        return
+                    end
+                    
+                    -- Ищем оружие в руках
+                    local character = LocalPlayer.Character
+                    if character then
+                        local tool = character:FindFirstChildOfClass("Tool")
+                        if tool and isAllowedWeapon(tool.Name) then
+                            pcall(function()
+                                updateRange(tool)
+                            end)
+                        end
+                    end
+                    
+                    -- Ищем оружие в рюкзаке
+                    local backpack = LocalPlayer:FindFirstChild("Backpack")
+                    if backpack then
+                        for _, tool in pairs(backpack:GetChildren()) do
+                            if tool:IsA("Tool") and isAllowedWeapon(tool.Name) then
+                                pcall(function()
+                                    updateRange(tool)
+                                end)
+                            end
+                        end
+                    end
+                    
+                    -- Ищем оружие в workspace.Players
+                    local playersFolder = workspace:FindFirstChild("Players")
+                    if playersFolder then
+                        local playerFolder = playersFolder:FindFirstChild(LocalPlayer.Name)
+                        if playerFolder then
+                            for _, child in pairs(playerFolder:GetChildren()) do
+                                if isAllowedWeapon(child.Name) then
+                                    pcall(function()
+                                        updateRange(child)
+                                    end)
+                                end
+                            end
+                        end
+                    end
+                end)
+            end
+        end
+        
+        function infinityRangeUtility:disable()
+            infinityRangeMod.enabled = false
+            
+            -- Восстанавливаем все оригинальные значения
+            local character = LocalPlayer.Character
+            if character then
+                local tool = character:FindFirstChildOfClass("Tool")
+                if tool then
+                    pcall(function()
+                        updateRange(tool)
+                    end)
+                end
+            end
+            
+            local backpack = LocalPlayer:FindFirstChild("Backpack")
+            if backpack then
+                for _, tool in pairs(backpack:GetChildren()) do
+                    if tool:IsA("Tool") then
+                        pcall(function()
+                            updateRange(tool)
+                        end)
+                    end
+                end
+            end
+            
+            local playersFolder = workspace:FindFirstChild("Players")
+            if playersFolder then
+                local playerFolder = playersFolder:FindFirstChild(LocalPlayer.Name)
+                if playerFolder then
+                    for _, child in pairs(playerFolder:GetChildren()) do
+                        pcall(function()
+                            updateRange(child)
+                        end)
+                    end
+                end
+            end
+            
+            if connection then
+                connection:Disconnect()
+                connection = nil
+            end
+            
+            -- Очищаем сохраненные значения
+            originalValues = {}
+        end
+        
+        _G.InfinityRangeUtility = infinityRangeUtility
+    end
+    
+    -- auto reload utility
+    do
+        local autoReloadUtility = {}
+        local connection = nil
+        local lastReloadTime = 0
+        local mainModule = nil
+        
+        function autoReloadUtility:enable()
+            if connection then
+                return
+            end
+            
+            -- Получаем MainModule
+            local replicatedStorage = game:GetService("ReplicatedStorage")
+            local handler = replicatedStorage:FindFirstChild("MainModule")
+            if not handler then
+                return
+            end
+            
+            local success, module = pcall(function()
+                return require(handler)
+            end)
+            
+            if not success or not module then
+                return
+            end
+            
+            mainModule = module
+            autoReloadMod.enabled = true
+            
+            connection = RunService.Heartbeat:Connect(function()
+                if not autoReloadMod.enabled then
+                    return
+                end
+                
+                -- Проверяем задержку после последней перезарядки
+                local now = tick()
+                if now - lastReloadTime < autoReloadMod.reloadDelay then
+                    return
+                end
+                
+                local character = LocalPlayer.Character
+                if not character then
+                    return
+                end
+                
+                -- Используем логику с MainModule.GunHold
+                local gun = mainModule.GunHold(character)
+                if not gun or not gun[1] then
+                    return
+                end
+                
+                local tool = gun[1]
+                local ammo = tool:FindFirstChild("Ammo")
+                if not ammo or ammo.Value > 0 then
+                    return
+                end
+                
+                -- Перезаряжаем оружие через MainRemoteEvent
+                local replicatedStorage = game:GetService("ReplicatedStorage")
+                local mainRemotes = replicatedStorage:FindFirstChild("MainRemotes")
+                if mainRemotes then
+                    local mainRemoteEvent = mainRemotes:FindFirstChild("MainRemoteEvent")
+                    if mainRemoteEvent then
+                        mainRemoteEvent:FireServer("Reload", tool)
+                        lastReloadTime = now
+                    end
+                end
+            end)
+        end
+        
+        function autoReloadUtility:disable()
+            autoReloadMod.enabled = false
+            
+            if connection then
+                connection:Disconnect()
+                connection = nil
+            end
+            
+            mainModule = nil
+        end
+        
+        _G.AutoReloadUtility = autoReloadUtility
     end
     
     -- targeting groupbox
@@ -1914,6 +2216,46 @@ do -- rage tab configuration
         -- Настраиваем зависимости
         ExpandHitboxDepbox:SetupDependencies({
             { Toggles.ExpandHitbox, true }
+        })
+        
+        OtherGroup:AddToggle('InfinityRange', {
+            Text = 'Infinity Range',
+            Default = false,
+            Tooltip = '>_<',
+            Callback = function(value)
+                infinityRangeMod.enabled = value
+                if value then
+                    if _G.InfinityRangeUtility then
+                        _G.InfinityRangeUtility:enable()
+                    end
+                    Library:Notify('on', 2)
+                else
+                    if _G.InfinityRangeUtility then
+                        _G.InfinityRangeUtility:disable()
+                    end
+                    Library:Notify('off', 2)
+                end
+            end
+        })
+        
+        OtherGroup:AddToggle('AutoReload', {
+            Text = 'Auto Reload',
+            Default = false,
+            Tooltip = '>_<',
+            Callback = function(value)
+                autoReloadMod.enabled = value
+                if value then
+                    if _G.AutoReloadUtility then
+                        _G.AutoReloadUtility:enable()
+                    end
+                    Library:Notify('on', 2)
+                else
+                    if _G.AutoReloadUtility then
+                        _G.AutoReloadUtility:disable()
+                    end
+                    Library:Notify('off', 2)
+                end
+            end
         })
     end
     
