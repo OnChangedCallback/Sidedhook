@@ -365,8 +365,11 @@ do -- rage tab configuration
     -- forcehit functionality
     do
         local function updateForceHitTarget()
+            -- Всегда сначала проверяем глобальный тогл
             if not _G.forcehit_enabled then
                 forceHitTarget.enabled = false
+                forceHitTarget.position = Vector3.new(0, 0, 0)
+                forceHitTarget.part = nil
                 return
             end
             
@@ -380,9 +383,13 @@ do -- rage tab configuration
                     forceHitTarget.part = targetPart
                 else
                     forceHitTarget.enabled = false
+                    forceHitTarget.position = Vector3.new(0, 0, 0)
+                    forceHitTarget.part = nil
                 end
             else
                 forceHitTarget.enabled = false
+                forceHitTarget.position = Vector3.new(0, 0, 0)
+                forceHitTarget.part = nil
             end
         end
         
@@ -471,9 +478,14 @@ do -- rage tab configuration
         
         -- Функция для обновления трейсера
         local function updateTracer()
+            -- Двойная проверка тоглов для безопасности
             if not _G.show_aimbot or not _G.silent_aim_enabled then
-                _G.aimbot_tracer.Visible = false
-                _G.aimbot_tracer_outline.Visible = false
+                if _G.aimbot_tracer then
+                    _G.aimbot_tracer.Visible = false
+                end
+                if _G.aimbot_tracer_outline then
+                    _G.aimbot_tracer_outline.Visible = false
+                end
                 return
             end
             
@@ -526,7 +538,18 @@ do -- rage tab configuration
         end
         
         -- Подключаем обновление трейсера к Heartbeat
-        _G.tracer_update_connection = RunService.Heartbeat:Connect(updateTracer)
+        _G.tracer_update_connection = RunService.Heartbeat:Connect(function()
+            if _G.show_aimbot and _G.silent_aim_enabled then
+                updateTracer()
+            else
+                if _G.aimbot_tracer then
+                    _G.aimbot_tracer.Visible = false
+                end
+                if _G.aimbot_tracer_outline then
+                    _G.aimbot_tracer_outline.Visible = false
+                end
+            end
+        end)
     end
     
     -- targeting groupbox
@@ -628,6 +651,7 @@ do -- rage tab configuration
             Tooltip = 'Show tracer from tool handle to aim position',
             Callback = function(value)
                 _G.show_aimbot = value
+                -- Немедленно скрываем трейсер при отключении
                 if not value then
                     if _G.aimbot_tracer then
                         _G.aimbot_tracer.Visible = false
@@ -672,12 +696,14 @@ do -- rage tab configuration
         _G.aimbot_color = Color3.new(1, 1, 1) -- белый по умолчанию
         _G.aimbot_outline_color = Color3.new(0, 0, 0) -- черный по умолчанию
         
-        -- Auto update всегда включен
+        -- Auto update только при включенных функциях
         _G.target_update_connection = RunService.Heartbeat:Connect(function()
-            if _G.targeting_framework then
+            -- Обновляем таргетинг только если включен SilentAim или ForceHit
+            if (_G.silent_aim_enabled or _G.forcehit_enabled) and _G.targeting_framework then
                 _G.targeting_framework:UpdateTarget()
             end
-            if _G.updateForceHitTarget then
+            -- Обновляем ForceHit цель только если ForceHit включен
+            if _G.forcehit_enabled and _G.updateForceHitTarget then
                 _G.updateForceHitTarget()
             end
         end)
